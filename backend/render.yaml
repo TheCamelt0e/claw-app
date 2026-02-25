@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: claw-api
+    runtime: python
+    buildCommand: pip install -r requirements-prod.txt
+    startCommand: uvicorn app.main_production:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    disk:
+      name: claw-data
+      mountPath: /data
+      sizeGB: 1
