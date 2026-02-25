@@ -8,11 +8,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 import os
 
-# Use Render's persistent disk if available, otherwise use local file
-if os.path.exists('/data'):
-    SQLALCHEMY_DATABASE_URL = "sqlite:////data/claw_app.db"
-else:
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./claw_app.db"
+# Use environment variable if set (Render), otherwise use local file
+SQLALCHEMY_DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./claw_app.db')
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 

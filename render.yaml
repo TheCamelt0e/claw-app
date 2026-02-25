@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: claw-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements-prod.txt
+    startCommand: cd backend && uvicorn app.main_production:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        value: sqlite:////data/claw.db
+    disk:
+      name: claw-data
+      mountPath: /data
+      sizeGB: 1
