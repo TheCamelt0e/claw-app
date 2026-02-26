@@ -99,6 +99,9 @@ async def capture_claw(
     """
     Capture a new intention (claw)
     """
+    # DEBUG: Log received parameters
+    print(f"[DEBUG] Capture called: content='{content[:30]}...', priority={priority}, priority_level={priority_level}")
+    
     user = get_or_create_test_user(db)
     
     # Check limit
@@ -158,10 +161,20 @@ async def capture_claw(
     
     # Ensure VIP indicators are set
     tags = new_claw.get_tags()
+    print(f"[DEBUG] Before fix - tags: {tags}, priority: {priority}")
+    
     if priority and "vip" not in tags and "priority" not in tags:
         tags.append("vip" if priority_level == "high" else "priority")
         new_claw.set_tags(tags)
         db.commit()
+        print(f"[DEBUG] Added VIP tag: {tags}")
+    
+    # Refresh to get latest data
+    db.refresh(new_claw)
+    final_tags = new_claw.get_tags()
+    is_vip = "vip" in final_tags or "priority" in final_tags or "🔥" in (new_claw.title or "")
+    
+    print(f"[DEBUG] Final - title: {new_claw.title}, tags: {final_tags}, is_vip: {is_vip}")
     
     return {
         "message": "Claw captured successfully!",
@@ -175,10 +188,10 @@ async def capture_claw(
             "category": new_claw.category,
             "action_type": new_claw.action_type,
             "app_trigger": new_claw.app_trigger,
-            "tags": new_claw.get_tags(),
+            "tags": final_tags,
             "status": new_claw.status,
             "expires_at": new_claw.expires_at.isoformat(),
-            "is_vip": priority  # Explicit VIP flag
+            "is_vip": is_vip  # Calculate based on actual data
         }
     }
 
