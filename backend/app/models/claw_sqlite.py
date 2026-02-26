@@ -71,14 +71,18 @@ class Claw(Base):
         self.tags = json.dumps(tags_list)
     
     def to_dict(self):
+        tags = self.get_tags()
+        is_vip = "vip" in tags or "priority" in tags or (self.title and "🔥" in self.title)
+        
         return {
             "id": self.id,
             "content": self.content,
             "title": self.title,
             "category": self.category,
-            "tags": self.get_tags(),
+            "tags": tags,
             "status": self.status,
             "location_name": self.location_name,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "is_vip": is_vip,
         }

@@ -156,9 +156,17 @@ async def capture_claw(
     db.commit()
     db.refresh(new_claw)
     
+    # Ensure VIP indicators are set
+    tags = new_claw.get_tags()
+    if priority and "vip" not in tags and "priority" not in tags:
+        tags.append("vip" if priority_level == "high" else "priority")
+        new_claw.set_tags(tags)
+        db.commit()
+    
     return {
         "message": "Claw captured successfully!",
         "priority": priority,
+        "priority_level": priority_level,
         "expires_in_days": expires_days,
         "claw": {
             "id": new_claw.id,
@@ -169,7 +177,8 @@ async def capture_claw(
             "app_trigger": new_claw.app_trigger,
             "tags": new_claw.get_tags(),
             "status": new_claw.status,
-            "expires_at": new_claw.expires_at.isoformat()
+            "expires_at": new_claw.expires_at.isoformat(),
+            "is_vip": priority  # Explicit VIP flag
         }
     }
 
