@@ -87,15 +87,12 @@ def get_or_create_test_user(db: Session) -> User:
     return user
 
 
-class CaptureRequest(BaseModel):
-    content: str
-    content_type: str = "text"
-    priority: bool = False
-    priority_level: Optional[str] = None
-
 @router.post("/capture")
 async def capture_claw(
-    request: CaptureRequest,
+    content: str,
+    content_type: str = "text",
+    priority: str = "false",  # Receive as string "true" or "false"
+    priority_level: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -103,10 +100,11 @@ async def capture_claw(
     """
     # DEBUG: Log ALL received parameters
     import sys
+    is_priority = priority.lower() == 'true'
     print(f"[DEBUG] ========== CAPTURE ==========", file=sys.stderr)
-    print(f"[DEBUG] content='{request.content}'", file=sys.stderr)
-    print(f"[DEBUG] priority={request.priority} (type: {type(request.priority)})", file=sys.stderr)
-    print(f"[DEBUG] priority_level={request.priority_level}", file=sys.stderr)
+    print(f"[DEBUG] content='{content}'", file=sys.stderr)
+    print(f"[DEBUG] priority='{priority}' -> is_priority={is_priority}", file=sys.stderr)
+    print(f"[DEBUG] priority_level={priority_level}", file=sys.stderr)
     print(f"[DEBUG] =================================", file=sys.stderr)
     
     user = get_or_create_test_user(db)
@@ -124,13 +122,13 @@ async def capture_claw(
         )
     
     # AI categorization (simplified)
-    ai_result = categorize_content(request.content)
+    ai_result = categorize_content(content)
     
     # Handle VIP/Priority items - shorter expiry, extra reminders
     expires_days = 7  # Default 7 days
-    if request.priority:
+    if is_priority:
         expires_days = 3  # VIP items expire faster to create urgency
-        if request.priority_level == "high":
+        if priority_level == "high":
             expires_days = 1  # High priority = 1 day
     
     expires_at = datetime.utcnow() + timedelta(days=expires_days)
@@ -138,8 +136,8 @@ async def capture_claw(
     # Create claw
     new_claw = Claw(
         user_id=user.id,
-        content=request.content,
-        content_type=request.content_type,
+        content=content,
+        content_type=content_type,
         title=ai_result["title"],
         category=ai_result["category"],
         action_type=ai_result["action_type"],
@@ -149,11 +147,11 @@ async def capture_claw(
     new_claw.set_tags(ai_result["tags"])
     
     # Store priority metadata in the claw
-    if request.priority:
+    if is_priority:
         new_claw.title = f"🔥 {new_claw.title}"
         # Add priority tag
         tags = new_claw.get_tags()
-        tags.append("vip" if request.priority_level == "high" else "priority")
+        tags.append("vip" if priority_level == "high" else "priority")
         new_claw.set_tags(tags)
     
     db.add(new_claw)
