@@ -211,9 +211,20 @@ async def get_my_claws(
     
     claws = query.order_by(Claw.created_at.desc()).all()
     
+    # Ensure all claws have proper VIP flag
+    result = []
+    for claw in claws:
+        claw_dict = claw.to_dict()
+        # Double-check is_vip flag
+        tags = claw.get_tags()
+        is_vip = "vip" in tags or "priority" in tags or "🔥" in (claw.title or "")
+        claw_dict["is_vip"] = is_vip
+        claw_dict["tags"] = tags  # Ensure tags are included
+        result.append(claw_dict)
+    
     return {
-        "items": [c.to_dict() for c in claws],
-        "total": len(claws)
+        "items": result,
+        "total": len(result)
     }
 
 
