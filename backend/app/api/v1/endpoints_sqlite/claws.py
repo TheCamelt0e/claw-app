@@ -90,6 +90,10 @@ def get_or_create_test_user(db: Session) -> User:
 async def capture_claw(
     content: str,
     content_type: str = "text",
+    priority: bool = False,
+    priority_level: str = None,
+    deadline: str = None,
+    extra_reminders: bool = False,
     db: Session = Depends(get_db)
 ):
     """
@@ -112,6 +116,15 @@ async def capture_claw(
     # AI categorization (simplified)
     ai_result = categorize_content(content)
     
+    # Handle VIP/Priority items - shorter expiry, extra reminders
+    expires_days = 7  # Default 7 days
+    if priority:
+        expires_days = 3  # VIP items expire faster to create urgency
+        if priority_level == "high":
+            expires_days = 1  # High priority = 1 day
+    
+    expires_at = datetime.utcnow() + timedelta(days=expires_days)
+    
     # Create claw
     new_claw = Claw(
         user_id=user.id,
@@ -120,9 +133,19 @@ async def capture_claw(
         title=ai_result["title"],
         category=ai_result["category"],
         action_type=ai_result["action_type"],
-        app_trigger=ai_result["app_trigger"]
+        app_trigger=ai_result["app_trigger"],
+        expires_at=expires_at
     )
     new_claw.set_tags(ai_result["tags"])
+    
+    # Store priority metadata in the claw (we'll add this to the model)
+    # For now, add a [VIP] or [PRIORITY] prefix to the title
+    if priority:
+        new_claw.title = f"🔥 {new_claw.title}"
+        # Add priority tag
+        tags = new_claw.get_tags()
+        tags.append("vip" if priority_level == "high" else "priority")
+        new_claw.set_tags(tags)
     
     db.add(new_claw)
     
@@ -135,6 +158,8 @@ async def capture_claw(
     
     return {
         "message": "Claw captured successfully!",
+        "priority": priority,
+        "expires_in_days": expires_days,
         "claw": {
             "id": new_claw.id,
             "content": new_claw.content,
