@@ -3,6 +3,7 @@ Claw endpoints - SQLite version
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import random
@@ -86,21 +87,27 @@ def get_or_create_test_user(db: Session) -> User:
     return user
 
 
+class CaptureRequest(BaseModel):
+    content: str
+    content_type: str = "text"
+    priority: bool = False
+    priority_level: Optional[str] = None
+
 @router.post("/capture")
 async def capture_claw(
-    content: str,
-    content_type: str = "text",
-    priority: bool = False,
-    priority_level: str = None,
-    deadline: str = None,
-    extra_reminders: bool = False,
+    request: CaptureRequest,
     db: Session = Depends(get_db)
 ):
     """
     Capture a new intention (claw)
     """
-    # DEBUG: Log received parameters
-    print(f"[DEBUG] Capture called: content='{content[:30]}...', priority={priority}, priority_level={priority_level}")
+    # DEBUG: Log ALL received parameters
+    import sys
+    print(f"[DEBUG] ========== CAPTURE ==========", file=sys.stderr)
+    print(f"[DEBUG] content='{request.content}'", file=sys.stderr)
+    print(f"[DEBUG] priority={request.priority} (type: {type(request.priority)})", file=sys.stderr)
+    print(f"[DEBUG] priority_level={request.priority_level}", file=sys.stderr)
+    print(f"[DEBUG] =================================", file=sys.stderr)
     
     user = get_or_create_test_user(db)
     
@@ -117,13 +124,13 @@ async def capture_claw(
         )
     
     # AI categorization (simplified)
-    ai_result = categorize_content(content)
+    ai_result = categorize_content(request.content)
     
     # Handle VIP/Priority items - shorter expiry, extra reminders
     expires_days = 7  # Default 7 days
-    if priority:
+    if request.priority:
         expires_days = 3  # VIP items expire faster to create urgency
-        if priority_level == "high":
+        if request.priority_level == "high":
             expires_days = 1  # High priority = 1 day
     
     expires_at = datetime.utcnow() + timedelta(days=expires_days)
@@ -131,8 +138,8 @@ async def capture_claw(
     # Create claw
     new_claw = Claw(
         user_id=user.id,
-        content=content,
-        content_type=content_type,
+        content=request.content,
+        content_type=request.content_type,
         title=ai_result["title"],
         category=ai_result["category"],
         action_type=ai_result["action_type"],
@@ -141,13 +148,12 @@ async def capture_claw(
     )
     new_claw.set_tags(ai_result["tags"])
     
-    # Store priority metadata in the claw (we'll add this to the model)
-    # For now, add a [VIP] or [PRIORITY] prefix to the title
-    if priority:
+    # Store priority metadata in the claw
+    if request.priority:
         new_claw.title = f"🔥 {new_claw.title}"
         # Add priority tag
         tags = new_claw.get_tags()
-        tags.append("vip" if priority_level == "high" else "priority")
+        tags.append("vip" if request.priority_level == "high" else "priority")
         new_claw.set_tags(tags)
     
     db.add(new_claw)
