@@ -10,6 +10,8 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+backend/.env
+backend/.env.local
 
 # IDE
 .vscode/

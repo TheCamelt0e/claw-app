@@ -1,39 +1,67 @@
 @echo off
-echo.
 echo ==========================================
-echo CLAW - Quick Test Build (Expo Go)
+echo 📱 CLAW Quick Build
 echo ==========================================
-echo.
-echo This is the FASTEST way to test:
-echo - No APK build needed
-echo - Instant testing on your phone
-echo - Share via QR code
 echo.
 
 cd mobile
 
-echo [1/3] Installing dependencies...
-call npm install
+echo 🔍 Verifying setup...
+
+REM Check if node_modules exists
+if not exist "node_modules" (
+    echo 📦 Installing dependencies...
+    npm install
+)
+
+REM Check TypeScript
+echo 📝 Checking TypeScript...
+npx tsc --noEmit
+if %ERRORLEVEL% neq 0 (
+    echo ❌ TypeScript errors found! Fix before building.
+    pause
+    exit /b 1
+)
+
+echo ✅ TypeScript check passed
+echo.
+
+REM Check login
+echo 🔑 Checking Expo login...
+npx eas whoami >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo ❌ Please login first: npx eas login
+    pause
+    exit /b 1
+)
+
+echo ✅ Logged in as:
+npx eas whoami
+echo.
+
+REM Start build
+echo 🚀 Starting build...
+echo.
+echo Build type:
+echo   [1] Preview APK (testing)
+echo   [2] Production AAB (Play Store)
+echo.
+
+choice /c 12 /n /m "Select: "
+
+if %ERRORLEVEL% == 1 (
+    echo 📦 Building Preview APK...
+    npx eas build --platform android --profile preview --non-interactive
+) else (
+    echo 📦 Building Production AAB...
+    npx eas build --platform android --profile production --non-interactive
+)
 
 echo.
-echo [2/3] Starting Expo...
-echo.
 echo ==========================================
-echo INSTRUCTIONS:
+echo ✅ Build Started!
 echo ==========================================
 echo.
-echo 1. Install "Expo Go" app on your phone
-echo    - Android: Play Store
-echo    - iOS: App Store
+echo Monitor at: https://expo.dev/accounts/camelt0e/projects/claw-app/builds
 echo.
-echo 2. Scan the QR code that will appear
-echo.
-echo 3. The app will open instantly!
-echo.
-echo ==========================================
-echo.
-
-echo [3/3] Starting development server...
-call expo start
-
 pause

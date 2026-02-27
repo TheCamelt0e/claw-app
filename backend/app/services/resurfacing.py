@@ -8,9 +8,10 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from app.core.database import SessionLocal
-from app.models.claw import Claw
-from app.models.user import User
+from app.core.database import SessionLocal, engine
+from app.core.database import Base
+from app.models.claw_sqlite import Claw
+from app.models.user_sqlite import User
 
 
 class ResurfacingEngine:
