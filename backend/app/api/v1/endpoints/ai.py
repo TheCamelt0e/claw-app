@@ -12,6 +12,7 @@ from app.services.gemini_service import gemini_service
 from app.services.categorization import categorize_content as fallback_categorize
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.claw_sqlite import Claw
+from app.models.user_sqlite import User
 
 router = APIRouter()
 
