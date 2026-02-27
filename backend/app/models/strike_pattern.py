@@ -1,10 +1,16 @@
 """
-Strike Pattern Model
+Strike Pattern Model - SECURITY HARDENED
 Tracks when/where users complete intentions to enable smart resurfacing
 """
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Float, Index
+from sqlalchemy import Column, String, Integer, DateTime, Float, Index, ForeignKey
 from app.core.database import Base
+
+
+def generate_uuid():
+    """Generate UUID string - using proper function instead of lambda"""
+    return str(uuid.uuid4())
 
 
 class StrikePattern(Base):
@@ -18,11 +24,20 @@ class StrikePattern(Base):
     """
     __tablename__ = "strike_patterns"
     
-    id = Column(String(36), primary_key=True, default=lambda: str(__import__('uuid').uuid4()))
-    user_id = Column(String(36), nullable=False, index=True)
+    id = Column(String(36), primary_key=True, default=generate_uuid)
     
-    # The claw that was struck
-    claw_id = Column(String(36), nullable=False)
+    # Foreign keys with cascade delete
+    user_id = Column(
+        String(36), 
+        ForeignKey("users.id", ondelete="CASCADE"), 
+        nullable=False, 
+        index=True
+    )
+    claw_id = Column(
+        String(36), 
+        ForeignKey("claws.id", ondelete="CASCADE"), 
+        nullable=False
+    )
     
     # What was completed
     category = Column(String(50), nullable=True)  # book, movie, product, etc.

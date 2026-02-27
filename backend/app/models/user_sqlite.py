@@ -1,5 +1,5 @@
 """
-SQLite-compatible User model
+SQLite-compatible User model - SECURITY HARDENED
 """
 import uuid
 from datetime import datetime
@@ -47,6 +47,9 @@ class User(Base):
     last_strike_date = Column(DateTime, nullable=True)
     streak_milestones = Column(String, default="")  # JSON array: ["7_day", "30_day", "100_day"]
     
+    # Token versioning for secure logout/revocation
+    token_version = Column(Integer, default=0, nullable=False)
+    
     # Email Verification
     email_verified = Column(Boolean, default=False)
     email_verification_token = Column(String(255), nullable=True, index=True)
@@ -56,27 +59,27 @@ class User(Base):
     password_reset_token = Column(String(255), nullable=True, index=True)
     password_reset_sent_at = Column(DateTime, nullable=True)
     
+    # Relationships
+    groups = relationship('Group', secondary='group_members', back_populates='members')
+    
     def is_pro(self) -> bool:
+        """Check if user has active Pro subscription"""
         if self.subscription_tier in ["pro", "family"]:
             if self.subscription_expires_at is None or self.subscription_expires_at > datetime.utcnow():
                 return True
         return False
     
-    # Relationships
-    groups = relationship('Group', secondary='group_members', back_populates='members')
-    
     def get_claw_limit(self) -> int:
+        """Get maximum number of active claws allowed (-1 = unlimited)"""
         if self.is_pro():
             return -1
-        return 50
+        return 50  # Free tier limit
     
     def update_streak(self) -> dict:
         """
         Update strike streak. Call this whenever user strikes an item.
         Returns streak info for UI feedback.
         """
-        from datetime import datetime, timedelta
-        
         now = datetime.utcnow()
         today = now.date()
         
@@ -122,8 +125,6 @@ class User(Base):
     
     def get_streak_status(self) -> dict:
         """Get current streak status for display"""
-        from datetime import datetime, timedelta
-        
         now = datetime.utcnow()
         expires_at = None
         

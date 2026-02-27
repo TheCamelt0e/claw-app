@@ -223,11 +223,27 @@ class PatternAnalyzer:
             Claw.status == "active"
         ).all()
         
-        # Score each one
+        if not claws:
+            return []
+        
+        # Batch fetch all patterns for this user in one query to avoid N+1
+        patterns_by_category = defaultdict(list)
+        all_categories = list(set(c.category for c in claws if c.category))
+        
+        if all_categories:
+            all_patterns = db.query(StrikePattern).filter(
+                StrikePattern.user_id == user_id,
+                StrikePattern.category.in_(all_categories)
+            ).all()
+            
+            for pattern in all_patterns:
+                patterns_by_category[pattern.category].append(pattern)
+        
+        # Score each one using batched patterns
         scored = []
         for claw in claws:
-            score, reason = PatternAnalyzer.calculate_resurface_score(
-                db, claw, lat, lng, now.hour, now.weekday()
+            score, reason = PatternAnalyzer._calculate_resurface_score_with_patterns(
+                claw, patterns_by_category.get(claw.category, []), lat, lng, now.hour, now.weekday()
             )
             scored.append({
                 "claw": claw,
@@ -247,3 +263,60 @@ class PatternAnalyzer:
             }
             for s in scored[:limit]
         ]
+    
+    @staticmethod
+    def _calculate_resurface_score_with_patterns(
+        claw: Claw,
+        patterns: List[StrikePattern],
+        current_lat: Optional[float] = None,
+        current_lng: Optional[float] = None,
+        current_hour: Optional[int] = None,
+        current_dow: Optional[int] = None
+    ) -> Tuple[float, str]:
+        """
+        Calculate resurface score using pre-fetched patterns (no DB queries).
+        """
+        score = 0.5  # Base score
+        reasons = []
+        
+        if not patterns:
+            # No pattern data - use defaults
+            if claw.category in ["product", "restaurant"]:
+                return (0.6, "Shopping item - check when near stores")
+            return (0.5, "No pattern data yet")
+        
+        # Check day of week match
+        dow_matches = sum(1 for p in patterns if p.day_of_week == current_dow)
+        if dow_matches > len(patterns) * 0.3:  # >30% of strikes on this day
+            score += 0.2
+            reasons.append(f"You often strike {claw.category} items on {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][current_dow]}")
+        
+        # Check hour match
+        hour_matches = sum(1 for p in patterns if abs(p.hour_of_day - current_hour) <= 2)
+        if hour_matches > len(patterns) * 0.3:
+            score += 0.2
+            reasons.append(f"Good time of day for you")
+        
+        # Check location match
+        if current_lat and current_lng and claw.category in ["product", "restaurant", "task"]:
+            near_store = PatternAnalyzer._find_nearest_store(current_lat, current_lng)
+            if near_store:
+                store_matches = sum(1 for p in patterns if p.near_store == near_store)
+                if store_matches > 0:
+                    score += 0.3
+                    reasons.append(f"You're near {near_store}!")
+        
+        # Urgency boost
+        if claw.is_priority:
+            score += 0.1
+            reasons.append("VIP item")
+        
+        # Expiry penalty
+        if claw.is_expired():
+            score = max(0.1, score - 0.3)
+            reasons.append("Expiring soon!")
+        
+        score = min(1.0, max(0.0, score))
+        reason_str = " • ".join(reasons) if reasons else "Based on your patterns"
+        
+        return (score, reason_str)

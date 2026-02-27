@@ -1,5 +1,5 @@
 /**
- * Transaction Engine - Offline-First Sync System
+ * Transaction Engine - Offline-First Sync System - SECURITY HARDENED
  * 
  * Every user action becomes a transaction that flows through:
  * Pending → Syncing → Confirmed (or Failed → Retry)
@@ -214,6 +214,7 @@ class TransactionEngine {
 
   /**
    * Execute the actual API call based on transaction type
+   * FIXED: Updated endpoints to match backend API
    */
   private async executeTransaction(tx: Transaction): Promise<any> {
     switch (tx.type) {
@@ -221,11 +222,16 @@ class TransactionEngine {
         return apiRequest('POST', '/claws/capture', {
           content: tx.payload.content,
           content_type: tx.payload.contentType || 'text',
-          ...tx.payload.extraData,
+          priority: tx.payload.extraData?.priority || false,
+          priority_level: tx.payload.extraData?.priority_level,
+          someday: tx.payload.extraData?.someday || false,
         });
 
       case 'STRIKE':
-        return apiRequest('POST', `/claws/${tx.payload.clawId}/strike`);
+        return apiRequest('POST', `/claws/${tx.payload.clawId}/strike`, {
+          lat: tx.payload.lat,
+          lng: tx.payload.lng,
+        });
 
       case 'EXTEND':
         return apiRequest('POST', `/claws/${tx.payload.clawId}/extend`, {
@@ -236,9 +242,14 @@ class TransactionEngine {
         return apiRequest('POST', `/claws/${tx.payload.clawId}/release`);
 
       case 'SET_ALARM':
-        return apiRequest('POST', `/claws/${tx.payload.clawId}/alarm`, {
-          alarm_at: tx.payload.alarmAt,
+        // FIXED: Correct endpoint path for notifications API
+        return apiRequest('POST', `/notifications/claw/${tx.payload.clawId}/set-alarm`, {
+          scheduled_time: tx.payload.alarmAt,  // FIXED: Correct field name
         });
+
+      case 'ADD_TO_CALENDAR':
+        // FIXED: Correct endpoint path for notifications API
+        return apiRequest('POST', `/notifications/claw/${tx.payload.clawId}/add-to-calendar`);
 
       default:
         throw new Error(`Unknown transaction type: ${tx.type}`);

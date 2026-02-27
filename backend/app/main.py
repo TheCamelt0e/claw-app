@@ -1,9 +1,9 @@
 """
-CLAW API - Production Ready
+CLAW API - Production Ready - SECURITY HARDENED
 Supports SQLite (development) and PostgreSQL (production)
 Includes Redis for distributed rate limiting and caching
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -16,6 +16,7 @@ from app.core.database import (
     IS_POSTGRES
 )
 from app.core.redis import init_redis, close_redis, redis_client
+from app.core.config import settings
 from app.api.v1.router import api_router
 
 
@@ -54,20 +55,30 @@ async def lifespan(app: FastAPI):
         print(f"[WARN] Error during shutdown: {e}")
 
 
+# Configure FastAPI based on environment
+docs_url = "/docs" if settings.is_development() else None
+redoc_url = "/redoc" if settings.is_development() else None
+openapi_url = "/openapi.json" if settings.is_development() else None
+
 app = FastAPI(
     title="CLAW API",
     description="Your Intention Archive - Capture now, Strike later",
-    version="1.0.0",
-    lifespan=lifespan
+    version=settings.APP_VERSION,
+    lifespan=lifespan,
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
 
-# CORS middleware - allow all origins for mobile apps
+# CORS middleware - properly configured for environment
+cors_origins = settings.get_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    max_age=600,  # Cache preflight for 10 minutes
 )
 
 # Include API routes
@@ -83,7 +94,8 @@ async def health_check():
     return {
         "status": "healthy" if db_healthy else "unhealthy",
         "service": "claw-api",
-        "version": "1.0.0",
+        "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
         "database": {
             "type": db_type,
             "connected": db_healthy
@@ -97,25 +109,10 @@ async def health_check():
 
 @app.get("/")
 async def root():
+    """Public endpoint with minimal info - no sensitive data exposed"""
     return {
-        "message": "Welcome to CLAW API",
-        "docs": "/docs",
-        "health": "/health",
-        "endpoints": {
-            "auth": {
-                "register": "POST /api/v1/auth/register",
-                "login": "POST /api/v1/auth/login",
-                "me": "GET /api/v1/auth/me",
-                "refresh": "POST /api/v1/auth/refresh",
-                "verify_email": "POST /api/v1/auth/verify-email",
-                "forgot_password": "POST /api/v1/auth/forgot-password",
-                "reset_password": "POST /api/v1/auth/reset-password"
-            },
-            "claws": {
-                "capture": "POST /api/v1/claws/capture",
-                "list": "GET /api/v1/claws/me",
-                "surface": "GET /api/v1/claws/surface",
-                "strike": "POST /api/v1/claws/{id}/strike"
-            }
-        }
+        "message": "CLAW API",
+        "version": settings.APP_VERSION,
+        "status": "operational",
+        "environment": settings.ENVIRONMENT
     }

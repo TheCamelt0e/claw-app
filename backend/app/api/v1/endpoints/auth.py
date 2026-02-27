@@ -1,9 +1,13 @@
 """
 Authentication endpoints with JWT, brute force protection, email verification and password reset
+SECURITY HARDENED VERSION
 """
+import asyncio
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
-import secrets
+from enum import Enum
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -32,7 +36,7 @@ router = APIRouter()
 # Request/Response Models
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=100)
+    password: str = Field(..., min_length=8, max_length=100)  # Increased min length
     display_name: Optional[str] = Field(None, max_length=100)
 
 
@@ -61,7 +65,7 @@ class UserResponse(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
-    token: str
+    token: str = Field(..., min_length=10, max_length=100)
 
 
 class ResendVerificationRequest(BaseModel):
@@ -73,8 +77,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(..., min_length=6, max_length=100)
+    token: str = Field(..., min_length=10, max_length=100)
+    new_password: str = Field(..., min_length=8, max_length=100)
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -88,8 +92,11 @@ async def register(
     Register a new user and return JWT token
     Rate limited: 5 attempts per minute per IP
     """
-    # Check if email already exists
-    existing = db.query(User).filter(User.email == request.email).first()
+    # Check if email already exists (case-insensitive)
+    existing = db.query(User).filter(
+        User.email.ilike(request.email)
+    ).first()
+    
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -102,11 +109,11 @@ async def register(
     # Create user
     display_name = request.display_name or request.email.split("@")[0]
     
-    # Generate verification token
+    # Generate verification token (cryptographically secure)
     verification_token = secrets.token_urlsafe(32)
     
     new_user = User(
-        email=request.email,
+        email=request.email.lower().strip(),  # Normalize email
         hashed_password=hashed_password,
         display_name=display_name,
         email_verification_token=verification_token,
@@ -122,7 +129,6 @@ async def register(
     rate_limiter.clear_failed_attempts(client_ip)
     
     # Send verification email (async - don't block registration)
-    import asyncio
     asyncio.create_task(
         email_service.send_verification_email(
             to_email=new_user.email,
@@ -132,7 +138,10 @@ async def register(
     )
     
     # Create JWT token
-    access_token = create_access_token(data={"sub": new_user.id})
+    access_token = create_access_token(
+        data={"sub": new_user.id},
+        user=new_user
+    )
     
     return {
         "access_token": access_token,
@@ -161,8 +170,10 @@ async def login(
     """
     client_ip = get_client_ip(http_request)
     
-    # Find user by email
-    user = db.query(User).filter(User.email == request.email).first()
+    # Find user by email (case-insensitive)
+    user = db.query(User).filter(
+        User.email.ilike(request.email)
+    ).first()
     
     if not user:
         # Record failed attempt
@@ -190,8 +201,11 @@ async def login(
     user.last_active_at = datetime.utcnow()
     db.commit()
     
-    # Create JWT token
-    access_token = create_access_token(data={"sub": user.id})
+    # Create JWT token with token versioning
+    access_token = create_access_token(
+        data={"sub": user.id},
+        user=user
+    )
     
     return {
         "access_token": access_token,
@@ -238,9 +252,38 @@ async def refresh_token(
     Refresh JWT token (get new token with extended expiration)
     Rate limited: 10 refreshes per minute
     """
-    access_token = create_access_token(data={"sub": current_user.id})
+    access_token = create_access_token(
+        data={"sub": current_user.id},
+        user=current_user
+    )
     
     return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": 60 * 60 * 24 * 7
+    }
+
+
+@router.post("/logout-all")
+async def logout_all_devices(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Logout from all devices by invalidating all existing tokens.
+    This increments the token version, making all existing tokens invalid.
+    """
+    current_user.token_version += 1
+    db.commit()
+    
+    # Generate new token for current session
+    access_token = create_access_token(
+        data={"sub": current_user.id},
+        user=current_user
+    )
+    
+    return {
+        "message": "Logged out from all other devices",
         "access_token": access_token,
         "token_type": "bearer",
         "expires_in": 60 * 60 * 24 * 7
@@ -250,8 +293,8 @@ async def refresh_token(
 @router.post("/change-password")
 @brute_force_protection(max_attempts=3, window_seconds=300)
 async def change_password(
-    current_password: str = Body(...),
-    new_password: str = Body(..., min_length=6, max_length=100),
+    current_password: str = Body(..., min_length=8),
+    new_password: str = Body(..., min_length=8, max_length=100),
     http_request: Request = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -259,6 +302,7 @@ async def change_password(
     """
     Change user's password
     Brute force protected: 3 failed attempts = 5 minute lockout
+    Also invalidates all existing tokens for security.
     """
     client_ip = get_client_ip(http_request) if http_request else "unknown"
     
@@ -275,9 +319,24 @@ async def change_password(
     
     # Hash and set new password
     current_user.hashed_password = get_password_hash(new_password)
+    
+    # Increment token version to invalidate all existing tokens
+    current_user.token_version += 1
+    
     db.commit()
     
-    return {"message": "Password updated successfully"}
+    # Generate new token
+    access_token = create_access_token(
+        data={"sub": current_user.id},
+        user=current_user
+    )
+    
+    return {
+        "message": "Password updated successfully. Please use your new token.",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": 60 * 60 * 24 * 7
+    }
 
 
 @router.delete("/account")
@@ -288,9 +347,34 @@ async def delete_account(
     """
     Delete user account and all associated data
     """
-    # Delete user's claws first (cascade would be better but doing manually for safety)
+    user_id = current_user.id
+    
+    # Delete user's claws first
     from app.models.claw_sqlite import Claw
-    db.query(Claw).filter(Claw.user_id == current_user.id).delete()
+    db.query(Claw).filter(Claw.user_id == user_id).delete()
+    
+    # Delete strike patterns
+    from app.models.strike_pattern import StrikePattern
+    db.query(StrikePattern).filter(StrikePattern.user_id == user_id).delete()
+    
+    # Delete user's group memberships
+    from app.models.group import group_members
+    db.execute(
+        group_members.delete().where(group_members.c.user_id == user_id)
+    )
+    
+    # Transfer group ownership for groups they own
+    from app.models.group import Group
+    owned_groups = db.query(Group).filter(Group.created_by == user_id).all()
+    for group in owned_groups:
+        if len(group.members) > 1:
+            # Transfer to another member
+            new_owner = next((m for m in group.members if m.id != user_id), None)
+            if new_owner:
+                group.created_by = new_owner.id
+        else:
+            # Delete empty groups
+            db.delete(group)
     
     # Delete user
     db.delete(current_user)
@@ -311,8 +395,11 @@ async def verify_email(
     Verify user's email address using verification token
     Rate limited: 10 attempts per minute
     """
+    # Sanitize token
+    token = request.token.strip()
+    
     user = db.query(User).filter(
-        User.email_verification_token == request.token
+        User.email_verification_token == token
     ).first()
     
     if not user:
@@ -354,7 +441,9 @@ async def resend_verification(
     Resend email verification link
     Rate limited: 3 attempts per minute
     """
-    user = db.query(User).filter(User.email == request.email).first()
+    user = db.query(User).filter(
+        User.email.ilike(request.email)
+    ).first()
     
     if not user:
         # Don't reveal if email exists
@@ -409,7 +498,9 @@ async def forgot_password(
     Rate limited: 3 attempts per minute
     Always returns success to prevent email enumeration
     """
-    user = db.query(User).filter(User.email == request.email).first()
+    user = db.query(User).filter(
+        User.email.ilike(request.email)
+    ).first()
     
     if user:
         # Check cooldown (5 minutes between requests)
@@ -452,8 +543,11 @@ async def reset_password(
     Reset password using reset token
     Rate limited: 5 attempts per minute
     """
+    # Sanitize token
+    token = request.token.strip()
+    
     user = db.query(User).filter(
-        User.password_reset_token == request.token
+        User.password_reset_token == token
     ).first()
     
     if not user:
@@ -476,48 +570,11 @@ async def reset_password(
     user.password_reset_token = None
     user.password_reset_sent_at = None
     
+    # Increment token version to invalidate all existing tokens
+    user.token_version += 1
+    
     db.commit()
     
     return {
         "message": "Password reset successfully. Please log in with your new password."
     }
-
-
-# Legacy endpoints for backward compatibility during transition
-@router.post("/register-legacy")
-async def register_legacy(
-    email: str,
-    password: str,
-    display_name: str = None,
-    db: Session = Depends(get_db)
-):
-    """Legacy register endpoint - redirects to new endpoint"""
-    try:
-        request = UserRegister(email=email, password=password, display_name=display_name)
-        # Note: Legacy endpoint doesn't have rate limiting - migrate to new endpoint ASAP
-        from fastapi import Request as FastAPIRequest
-        dummy_request = FastAPIRequest(scope={"type": "http", "client": ("127.0.0.1", 0)})
-        return await register(dummy_request, request, db)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/login-legacy")
-async def login_legacy(
-    email: str,
-    password: str,
-    db: Session = Depends(get_db)
-):
-    """Legacy login endpoint - redirects to new endpoint"""
-    try:
-        request = UserLogin(email=email, password=password)
-        # Note: Legacy endpoint doesn't have brute force protection - migrate to new endpoint ASAP
-        from fastapi import Request as FastAPIRequest
-        dummy_request = FastAPIRequest(scope={"type": "http", "client": ("127.0.0.1", 0)})
-        return await login(dummy_request, request, db)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))

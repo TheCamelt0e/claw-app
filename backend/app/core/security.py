@@ -1,9 +1,9 @@
 """
-Security utilities for JWT authentication and password hashing
+Security utilities for JWT authentication and password hashing - SECURITY HARDENED
 """
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from jose import JWTError, jwt
+from jose import JWTError, jwt, ExpiredSignatureError
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -13,8 +13,12 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.user_sqlite import User
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context - using bcrypt with appropriate work factor
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=12  # Adjust based on performance requirements (10-14 typical)
+)
 
 # JWT configuration
 ALGORITHM = "HS256"
@@ -26,6 +30,8 @@ token_scheme = HTTPBearer(auto_error=False)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password"""
+    if not plain_password or not hashed_password:
+        return False
     return pwd_context.verify(plain_password, hashed_password)
 
 
@@ -34,12 +40,13 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: Dict[str, Any], user: User, expires_delta: Optional[timedelta] = None) -> str:
     """
-    Create a JWT access token
+    Create a JWT access token with token versioning for invalidation support.
     
     Args:
         data: Dictionary containing claims (typically {"sub": user_id})
+        user: User model for token versioning
         expires_delta: Optional custom expiration time
     
     Returns:
@@ -55,7 +62,8 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     to_encode.update({
         "exp": expire,
         "iat": datetime.utcnow(),  # Issued at
-        "type": "access"
+        "type": "access",
+        "token_version": getattr(user, 'token_version', 0)  # Include token version
     })
     
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
@@ -64,17 +72,19 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Decode and validate a JWT token
+    Decode and validate a JWT token.
     
     Args:
         token: The JWT string to decode
     
     Returns:
-        Decoded payload dict or None if invalid
+        Decoded payload dict or None if invalid/expired
     """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
         return payload
+    except ExpiredSignatureError:
+        return None
     except JWTError:
         return None
 
@@ -84,7 +94,8 @@ def get_current_user(
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Dependency to get the current authenticated user from JWT token
+    Dependency to get the current authenticated user from JWT token.
+    Validates token version to support token revocation.
     
     Usage:
         @router.get("/protected")
@@ -111,20 +122,34 @@ def get_current_user(
     # Check token type
     token_type = payload.get("type")
     if token_type != "access":
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     # Get user from database
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
     
+    # Check if user account is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated"
         )
     
-    # Update last active
+    # Check token version (for token revocation)
+    token_version = payload.get("token_version", 0)
+    if token_version != getattr(user, 'token_version', 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Update last active (async fire-and-forget would be better here)
     user.last_active_at = datetime.utcnow()
     db.commit()
     
@@ -136,8 +161,8 @@ def get_current_user_optional(
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
-    Get current user if authenticated, otherwise return None
-    Useful for endpoints that work both authenticated and anonymously
+    Get current user if authenticated, otherwise return None.
+    Useful for endpoints that work both authenticated and anonymously.
     """
     if not credentials:
         return None
@@ -152,20 +177,14 @@ def get_current_user_optional(
             return None
         
         user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            return None
+        
+        # Check token version
+        token_version = payload.get("token_version", 0)
+        if token_version != getattr(user, 'token_version', 0):
+            return None
+        
         return user
     except Exception:
         return None
-
-
-def get_current_active_user(
-    current_user: User = Depends(get_current_user)
-) -> User:
-    """
-    Dependency that ensures user is both authenticated and active
-    """
-    if not current_user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user"
-        )
-    return current_user

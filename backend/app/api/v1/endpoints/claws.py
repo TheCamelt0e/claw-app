@@ -1,30 +1,54 @@
 """
-Claw endpoints - Protected by JWT authentication
+Claw endpoints - Protected by JWT authentication - SECURITY HARDENED
 """
 from typing import List, Optional
+from enum import Enum
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import random
+import logging
 
 from app.core.database import get_db
 from app.core.config import VIP_EXPIRY_DAYS, HIGH_PRIORITY_EXPIRY_DAYS, DEFAULT_EXPIRY_DAYS, FREE_TIER_CLAW_LIMIT
 from app.core.security import get_current_user, get_current_user_optional
+from app.core.rate_limit import rate_limit
 from app.models.claw_sqlite import Claw
 from app.models.user_sqlite import User
 from app.services.categorization import categorize_content
 from app.services.user_service import increment_claws_created, increment_claws_completed
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+# Enums for validation
+class ClawStatus(str, Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    ARCHIVED = "archived"
+
+
+class ContentType(str, Enum):
+    TEXT = "text"
+    VOICE = "voice"
+    PHOTO = "photo"
+
+
+class PriorityLevel(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 
 # Request/Response Models
 class CaptureRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="The intention content to capture")
-    content_type: str = Field(default="text", description="Type of content: text, voice")
+    content_type: ContentType = Field(default=ContentType.TEXT, description="Type of content")
     priority: bool = Field(default=False, description="Whether this is a VIP/priority item")
-    priority_level: Optional[str] = Field(default=None, description="Priority level: high, medium, low")
+    priority_level: Optional[PriorityLevel] = Field(default=None, description="Priority level")
     someday: bool = Field(default=False, description="If true, item goes to Someday pile (no expiry)")
 
 
@@ -43,6 +67,7 @@ class StrikeRequest(BaseModel):
 
 
 @router.post("/capture")
+@rate_limit(requests_per_minute=30)  # Prevent spam
 async def capture_claw(
     request: CaptureRequest,
     current_user: User = Depends(get_current_user),
@@ -57,7 +82,7 @@ async def capture_claw(
     # Check limit for free tier
     active_count = db.query(Claw).filter(
         Claw.user_id == current_user.id,
-        Claw.status == "active"
+        Claw.status == ClawStatus.ACTIVE
     ).count()
     
     claw_limit = current_user.get_claw_limit()
@@ -67,7 +92,21 @@ async def capture_claw(
             detail=f"Free tier limited to {FREE_TIER_CLAW_LIMIT} active claws. Upgrade to Pro!"
         )
     
-    # AI categorization (simplified)
+    # ENFORCE: Only Pro users can create VIP items
+    is_priority = request.priority
+    priority_level = request.priority_level.value if request.priority_level else None
+    
+    if is_priority and not current_user.is_pro():
+        logger.warning(f"Non-pro user {current_user.id} attempted VIP capture - downgrading to normal")
+        is_priority = False
+        priority_level = None
+    
+    # ENFORCE: Only Pro users can use HIGH priority
+    if is_priority and priority_level == "high" and current_user.subscription_tier != "pro":
+        logger.warning(f"Non-pro user {current_user.id} attempted HIGH priority - downgrading to medium")
+        priority_level = "medium"
+    
+    # AI categorization
     ai_result = categorize_content(content)
     
     # Determine expiry
@@ -75,9 +114,9 @@ async def capture_claw(
     if request.someday:
         expires_days = 3650  # 10 years = effectively never
         ai_result["category"] = "someday"
-    elif request.priority:
+    elif is_priority:
         expires_days = VIP_EXPIRY_DAYS
-        if request.priority_level == "high":
+        if priority_level == "high":
             expires_days = HIGH_PRIORITY_EXPIRY_DAYS
     
     expires_at = datetime.utcnow() + timedelta(days=expires_days)
@@ -86,21 +125,21 @@ async def capture_claw(
     new_claw = Claw(
         user_id=current_user.id,
         content=content,
-        content_type=request.content_type,
+        content_type=request.content_type.value,
         title=ai_result["title"],
         category=ai_result["category"],
         action_type=ai_result["action_type"],
         app_trigger=ai_result["app_trigger"],
         expires_at=expires_at,
-        is_priority=request.priority
+        is_priority=is_priority
     )
     new_claw.set_tags(ai_result["tags"])
     
     # Store priority/someday metadata
-    if request.priority:
+    if is_priority:
         new_claw.title = f"🔥 {new_claw.title}"
         tags = new_claw.get_tags()
-        tags.append("vip" if request.priority_level == "high" else "priority")
+        tags.append("vip" if priority_level == "high" else "priority")
         new_claw.set_tags(tags)
     elif request.someday:
         new_claw.title = f"🔮 {new_claw.title}"
@@ -108,25 +147,31 @@ async def capture_claw(
         tags.append("someday")
         new_claw.set_tags(tags)
     
-    db.add(new_claw)
-    db.commit()
-    
-    # Update user stats
-    increment_claws_created(db, current_user)
-    db.refresh(new_claw)
-    
-    return {
-        "message": "Claw captured successfully!",
-        "priority": request.priority,
-        "priority_level": request.priority_level,
-        "expires_in_days": expires_days,
-        "claw": new_claw.to_dict()
-    }
+    try:
+        db.add(new_claw)
+        db.flush()  # Get the ID without committing
+        
+        # Update user stats
+        increment_claws_created(db, current_user)
+        db.refresh(new_claw)
+        db.commit()
+        
+        return {
+            "message": "Claw captured successfully!",
+            "priority": is_priority,
+            "priority_level": priority_level,
+            "expires_in_days": expires_days,
+            "claw": new_claw.to_dict()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to capture claw: {e}")
+        raise HTTPException(status_code=500, detail="Failed to capture claw")
 
 
 @router.get("/me")
 async def get_my_claws(
-    status: Optional[str] = Query("active"),
+    status: Optional[ClawStatus] = Query(ClawStatus.ACTIVE),  # Use enum for validation
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page (max 100)"),
     current_user: User = Depends(get_current_user),
@@ -141,7 +186,7 @@ async def get_my_claws(
     
     # Apply status filter
     if status:
-        query = query.filter(Claw.status == status)
+        query = query.filter(Claw.status == status.value)
     
     # Get total count for pagination
     total = query.count()
@@ -157,7 +202,7 @@ async def get_my_claws(
         "total": total,
         "page": page,
         "per_page": per_page,
-        "pages": (total + per_page - 1) // per_page,  # Ceiling division
+        "pages": (total + per_page - 1) // per_page,
         "has_next": offset + len(result) < total,
         "has_prev": page > 1
     }
@@ -174,10 +219,20 @@ async def get_surface_claws(
     """
     Get claws that should be surfaced based on current context
     """
+    # Validate coordinates if provided
+    if (lat is not None and lng is None) or (lat is None and lng is not None):
+        raise HTTPException(status_code=400, detail="Both lat and lng must be provided together")
+    
+    if lat is not None and not (-90 <= lat <= 90):
+        raise HTTPException(status_code=400, detail="Invalid latitude")
+    
+    if lng is not None and not (-180 <= lng <= 180):
+        raise HTTPException(status_code=400, detail="Invalid longitude")
+    
     # Get active claws for this user only
     claws = db.query(Claw).filter(
         Claw.user_id == current_user.id,
-        Claw.status == "active",
+        Claw.status == ClawStatus.ACTIVE,
         Claw.expires_at > datetime.utcnow()
     ).all()
     
@@ -200,7 +255,7 @@ async def get_surface_claws(
     # Sort by score
     scored_claws.sort(key=lambda x: x[1], reverse=True)
     
-    # Update last_surfaced
+    # Update last_surfaced (limit to top 3)
     surfaced = []
     for claw, score in scored_claws[:3]:
         claw.last_surfaced_at = datetime.utcnow()
@@ -213,6 +268,7 @@ async def get_surface_claws(
 
 
 @router.post("/{claw_id}/strike")
+@rate_limit(requests_per_minute=60)  # Prevent strike spam
 async def strike_claw(
     claw_id: str,
     request: Optional[StrikeRequest] = None,
@@ -222,6 +278,7 @@ async def strike_claw(
     """Mark a claw as completed - records pattern for smart resurfacing"""
     from app.services.pattern_analyzer import PatternAnalyzer
     
+    # Get claw with ownership check
     claw = db.query(Claw).filter(
         Claw.id == claw_id,
         Claw.user_id == current_user.id
@@ -230,10 +287,18 @@ async def strike_claw(
     if not claw:
         raise HTTPException(status_code=404, detail="Claw not found")
     
+    # AUTHORIZATION: Check if already completed
+    if claw.status == ClawStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Claw already completed")
+    
+    # AUTHORIZATION: Allow striking expired but warn
+    if claw.status == ClawStatus.EXPIRED:
+        logger.info(f"User {current_user.id} striking expired claw {claw_id}")
+    
     # Calculate resurface score BEFORE marking as completed
     resurface_score = None
     resurface_reason = None
-    if request and request.lat and request.lng:
+    if request and request.lat is not None and request.lng is not None:
         score, reason = PatternAnalyzer.calculate_resurface_score(
             db=db,
             claw=claw,
@@ -245,40 +310,47 @@ async def strike_claw(
         resurface_score = score
         resurface_reason = reason
     
-    claw.status = "completed"
-    claw.completed_at = datetime.utcnow()
-    db.commit()
-    
-    # Record strike pattern for AI learning
-    PatternAnalyzer.record_strike(
-        db=db,
-        user_id=current_user.id,
-        claw_id=claw.id,
-        category=claw.category,
-        action_type=claw.action_type,
-        captured_at=claw.created_at,
-        lat=request.lat if request else None,
-        lng=request.lng if request else None
-    )
-    
-    # Update user stats
-    increment_claws_completed(db, current_user)
-    
-    # Update strike streak (gamification)
-    streak_info = current_user.update_streak()
-    db.commit()
-    
-    return {
-        "message": "STRIKE! Great job!",
-        "claw_id": claw_id,
-        "streak": streak_info,
-        "resurface_score": resurface_score,
-        "resurface_reason": resurface_reason,
-        "oracle_moment": resurface_score and resurface_score > 0.7
-    }
+    try:
+        # Mark as completed
+        claw.status = ClawStatus.COMPLETED
+        claw.completed_at = datetime.utcnow()
+        
+        # Record strike pattern for AI learning
+        PatternAnalyzer.record_strike(
+            db=db,
+            user_id=current_user.id,
+            claw_id=claw.id,
+            category=claw.category,
+            action_type=claw.action_type,
+            captured_at=claw.created_at,
+            lat=request.lat if request else None,
+            lng=request.lng if request else None
+        )
+        
+        # Update user stats
+        increment_claws_completed(db, current_user)
+        
+        # Update strike streak (gamification)
+        streak_info = current_user.update_streak()
+        
+        db.commit()
+        
+        return {
+            "message": "STRIKE! Great job!",
+            "claw_id": claw_id,
+            "streak": streak_info,
+            "resurface_score": resurface_score,
+            "resurface_reason": resurface_reason,
+            "oracle_moment": resurface_score and resurface_score > 0.7
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to strike claw: {e}")
+        raise HTTPException(status_code=500, detail="Failed to strike claw")
 
 
 @router.post("/{claw_id}/release")
+@rate_limit(requests_per_minute=30)
 async def release_claw(
     claw_id: str,
     current_user: User = Depends(get_current_user),
@@ -293,13 +365,31 @@ async def release_claw(
     if not claw:
         raise HTTPException(status_code=404, detail="Claw not found")
     
-    claw.status = "expired"
-    db.commit()
+    # AUTHORIZATION: Only active claws can be released
+    if claw.status != ClawStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot release claw with status: {claw.status}"
+        )
     
-    return {"message": "Claw released.", "claw_id": claw_id}
+    # AUTHORIZATION: Warn about releasing VIP items
+    if claw.is_vip():
+        logger.warning(f"User {current_user.id} releasing VIP claw: {claw_id}")
+    
+    try:
+        claw.status = ClawStatus.EXPIRED
+        claw.expires_at = datetime.utcnow()  # Mark as expired now
+        db.commit()
+        
+        return {"message": "Claw released.", "claw_id": claw_id}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to release claw: {e}")
+        raise HTTPException(status_code=500, detail="Failed to release claw")
 
 
 @router.post("/{claw_id}/extend")
+@rate_limit(requests_per_minute=30)
 async def extend_claw(
     claw_id: str,
     request: ExtendRequest,
@@ -315,25 +405,38 @@ async def extend_claw(
     if not claw:
         raise HTTPException(status_code=404, detail="Claw not found")
     
-    # Extend expiration
-    current_expires = claw.expires_at or datetime.utcnow()
-    claw.expires_at = current_expires + timedelta(days=request.days)
+    # AUTHORIZATION: Only active claws can be extended
+    if claw.status != ClawStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot extend claw with status: {claw.status}"
+        )
     
-    db.commit()
-    db.refresh(claw)
-    
-    return {
-        "message": f"Extended by {request.days} days",
-        "claw": claw.to_dict()
-    }
+    try:
+        # Extend expiration
+        current_expires = claw.expires_at or datetime.utcnow()
+        claw.expires_at = current_expires + timedelta(days=request.days)
+        
+        db.commit()
+        db.refresh(claw)
+        
+        return {
+            "message": f"Extended by {request.days} days",
+            "claw": claw.to_dict()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to extend claw: {e}")
+        raise HTTPException(status_code=500, detail="Failed to extend claw")
 
 
-@router.get("/demo-data")
+@router.post("/demo-data")
+@rate_limit(requests_per_minute=1)  # Very strict rate limit
 async def create_demo_data(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create sample claws for testing"""
+    """Create sample claws for testing - rate limited to prevent abuse"""
     demo_claws = [
         "That book Sarah mentioned about atomic habits",
         "Try that new Italian restaurant downtown",
@@ -345,25 +448,31 @@ async def create_demo_data(
         "Schedule dentist appointment",
     ]
     
-    created = []
-    for content in demo_claws:
-        ai_result = categorize_content(content)
-        claw = Claw(
-            user_id=current_user.id,
-            content=content,
-            title=ai_result["title"],
-            category=ai_result["category"],
-            action_type=ai_result["action_type"],
-            app_trigger=ai_result["app_trigger"]
-        )
-        claw.set_tags(ai_result["tags"])
-        db.add(claw)
-        created.append(content)
-    
-    current_user.total_claws_created += len(demo_claws)
-    db.commit()
-    
-    return {
-        "message": f"Created {len(created)} demo claws",
-        "claws": created
-    }
+    created_claws = []
+    try:
+        for content in demo_claws:
+            ai_result = categorize_content(content)
+            claw = Claw(
+                user_id=current_user.id,
+                content=content,
+                title=ai_result["title"],
+                category=ai_result["category"],
+                action_type=ai_result["action_type"],
+                app_trigger=ai_result["app_trigger"]
+            )
+            claw.set_tags(ai_result["tags"])
+            db.add(claw)
+            created_claws.append(claw)
+        
+        current_user.total_claws_created += len(demo_claws)
+        db.commit()
+        
+        # Return actual claw objects instead of just strings
+        return {
+            "message": f"Created {len(created_claws)} demo claws",
+            "claws": [c.to_dict() for c in created_claws]
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to create demo data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create demo data")
