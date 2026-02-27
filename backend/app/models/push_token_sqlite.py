@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.core.database_sqlite import Base
+from app.core.database import Base
 
 
 def generate_uuid():
