@@ -9,9 +9,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: DATABASE_URL
-        fromDatabase:
-          name: claw-postgres
-          property: connectionString
+        value: sqlite:///./claw_app.db
       - key: SECRET_KEY
         generateValue: true
       - key: GEMINI_API_KEY
@@ -37,8 +35,3 @@ services:
       - key: AUDIT_LOG_RETENTION_DAYS
         value: 90
     healthCheckPath: /health
-
-databases:
-  - name: claw-postgres
-    plan: free
-    ipAllowList: []
