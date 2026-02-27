@@ -12,6 +12,6 @@ __all__ = [
     "Alarm", 
     "CalendarEvent",
     "Group",
-    "GroupMember",
+    "group_members",
     "AuditLog"
 ]

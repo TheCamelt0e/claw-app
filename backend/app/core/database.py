@@ -64,7 +64,7 @@ def init_db():
     from app.models.claw_sqlite import Claw
     from app.models.user_sqlite import User
     from app.models.strike_pattern import StrikePattern
-    from app.models.group import Group, GroupMember, GroupClaw
+    from app.models.group import Group, group_members, GroupClaw
     
     Base.metadata.create_all(bind=engine)
     print(f"[Database] Tables created successfully ({'SQLite' if IS_SQLITE else 'PostgreSQL'})")
