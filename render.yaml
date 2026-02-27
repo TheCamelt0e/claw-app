@@ -53,6 +53,10 @@ services:
         value: true
       - key: AUDIT_LOG_RETENTION_DAYS
         value: 90
+      
+      # Environment (production disables docs/debug endpoints)
+      - key: ENVIRONMENT
+        value: production
         
     healthCheckPath: /health
 
