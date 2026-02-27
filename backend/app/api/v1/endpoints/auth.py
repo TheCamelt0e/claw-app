@@ -497,7 +497,7 @@ async def register_legacy(
         # Note: Legacy endpoint doesn't have rate limiting - migrate to new endpoint ASAP
         from fastapi import Request as FastAPIRequest
         dummy_request = FastAPIRequest(scope={"type": "http", "client": ("127.0.0.1", 0)})
-        return await register(request, dummy_request, db)
+        return await register(dummy_request, request, db)
     except HTTPException:
         raise
     except Exception as e:
@@ -516,7 +516,7 @@ async def login_legacy(
         # Note: Legacy endpoint doesn't have brute force protection - migrate to new endpoint ASAP
         from fastapi import Request as FastAPIRequest
         dummy_request = FastAPIRequest(scope={"type": "http", "client": ("127.0.0.1", 0)})
-        return await login(request, dummy_request, db)
+        return await login(dummy_request, request, db)
     except HTTPException:
         raise
     except Exception as e:
