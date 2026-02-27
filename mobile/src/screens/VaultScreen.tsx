@@ -167,7 +167,8 @@ export default function VaultScreen() {
 
   useEffect(() => {
     fetchClaws(activeFilter);
-  }, [activeFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter, fetchClaws]);
 
   useEffect(() => {
     if (error) {

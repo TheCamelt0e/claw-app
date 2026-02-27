@@ -45,7 +45,6 @@ export default function StrikeScreen({ navigation }: any) {
     addToCalendar,
     checkAllNotifications,
     locationEnabled,
-    fetchSuggestions: refreshSuggestions,
   } = useNotificationsStore();
   
   const [refreshing, setRefreshing] = useState(false);

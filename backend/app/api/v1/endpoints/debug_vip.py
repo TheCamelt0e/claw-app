@@ -1,22 +1,33 @@
 """
 Debug endpoint to check VIP status
+DEVELOPMENT ONLY - Removed in production
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models.claw_sqlite import Claw
+from app.models.user_sqlite import User
 
 router = APIRouter()
 
 
 @router.get("/check-vip/{claw_id}")
-async def check_vip(claw_id: str, db: Session = Depends(get_db)):
-    """Debug endpoint to check VIP status of a claw"""
-    claw = db.query(Claw).filter(Claw.id == claw_id).first()
+async def check_vip(
+    claw_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Debug endpoint to check VIP status of user's claw"""
+    # Only allow checking own claws
+    claw = db.query(Claw).filter(
+        Claw.id == claw_id,
+        Claw.user_id == current_user.id
+    ).first()
     
     if not claw:
-        return {"error": "Claw not found"}
+        raise HTTPException(status_code=404, detail="Claw not found")
     
     tags = claw.get_tags()
     
@@ -31,10 +42,13 @@ async def check_vip(claw_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/list-all")
-async def list_all_claws(db: Session = Depends(get_db)):
-    """List all claws with VIP status"""
-    claws = db.query(Claw).all()
+@router.get("/my-claws")
+async def list_my_claws(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List current user's claws with VIP status"""
+    claws = db.query(Claw).filter(Claw.user_id == current_user.id).all()
     
     result = []
     for claw in claws:

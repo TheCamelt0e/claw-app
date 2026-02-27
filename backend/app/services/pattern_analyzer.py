@@ -60,9 +60,13 @@ class PatternAnalyzer:
             time_to_strike_hours=time_to_strike,
         )
         
-        db.add(pattern)
-        db.commit()
-        return pattern
+        try:
+            db.add(pattern)
+            db.commit()
+            return pattern
+        except Exception:
+            db.rollback()
+            raise
     
     @staticmethod
     def _find_nearest_store(lat: float, lng: float) -> Optional[str]:

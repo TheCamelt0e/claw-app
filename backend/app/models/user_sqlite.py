@@ -2,7 +2,7 @@
 SQLite-compatible User model - SECURITY HARDENED
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import Column, String, DateTime, Boolean, Integer
 from sqlalchemy.orm import relationship
 

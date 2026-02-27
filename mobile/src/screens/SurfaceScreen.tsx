@@ -95,12 +95,12 @@ export default function SurfaceScreen() {
 
   const checkNearbyStores = async (lat: number, lng: number) => {
     try {
-      const stores = await apiRequest('POST', '/locations/nearby', {
+      const response = await apiRequest('GET', '/notifications/nearby-stores', undefined, {
         lat,
         lng,
-        radius_meters: 500,
+        radius: 500,
       });
-      setNearbyStores(Array.isArray(stores) ? stores : []);
+      setNearbyStores(response?.stores || []);
     } catch (error) {
       console.error('Nearby stores error:', error);
     }
@@ -109,8 +109,8 @@ export default function SurfaceScreen() {
   const fetchUserPatterns = async () => {
     setIsLoadingPatterns(true);
     try {
-      const patterns = await apiRequest('GET', '/locations/my-patterns');
-      setUserPatterns(patterns);
+      const response = await apiRequest('GET', '/notifications/my-patterns');
+      setUserPatterns(response?.patterns || response || []);
     } catch (error) {
       console.error('Patterns error:', error);
     } finally {
@@ -124,7 +124,7 @@ export default function SurfaceScreen() {
     
     // Log pattern for AI learning
     try {
-      await apiRequest('POST', '/locations/patterns/log-strike', {
+      await apiRequest('POST', '/notifications/patterns/log-strike', {
         category,
         action_type: actionType,
       });

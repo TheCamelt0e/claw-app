@@ -150,8 +150,12 @@ def get_current_user(
         )
     
     # Update last active (async fire-and-forget would be better here)
-    user.last_active_at = datetime.utcnow()
-    db.commit()
+    try:
+        user.last_active_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     
     return user
 

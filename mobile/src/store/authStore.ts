@@ -291,7 +291,14 @@ export async function ensureValidToken(): Promise<string | null> {
   if (!token) return null;
   
   // Check if token is expired or about to expire (within 5 minutes)
-  const expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
+  let expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
+  
+  // Handle NaN case
+  if (isNaN(expiresAt)) {
+    await AsyncStorage.removeItem(TOKEN_EXPIRES_KEY);
+    return null;
+  }
+  
   const needsRefresh = Date.now() >= (expiresAt - 5 * 60 * 1000);
   
   if (needsRefresh) {

@@ -239,12 +239,14 @@ export default function LoginScreen() {
             </Text>
           </View>
 
-          {/* Demo hint */}
-          <View style={styles.demoContainer}>
-            <Text style={styles.demoText}>
-              Test account: a@a.com / aaaaaa
-            </Text>
-          </View>
+          {/* Demo hint - only in development */}
+          {__DEV__ && (
+            <View style={styles.demoContainer}>
+              <Text style={styles.demoText}>
+                Test account: test@example.com / password123
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>

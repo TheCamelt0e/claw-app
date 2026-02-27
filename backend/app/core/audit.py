@@ -383,7 +383,7 @@ def audit_log(
                 if get_resource_id and result:
                     try:
                         resource_id = get_resource_id(result)
-                    except:
+                    except Exception:
                         pass
                 
                 # Build details
@@ -392,7 +392,7 @@ def audit_log(
                     try:
                         body = await request.body()
                         details["request_body"] = body.decode()[:1000]  # Limit size
-                    except:
+                    except Exception:
                         pass
                 
                 # Get IP and user agent

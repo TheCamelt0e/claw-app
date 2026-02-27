@@ -2,14 +2,14 @@
 Push notification service for CLAW
 Sends alerts when user is near relevant stores, or when it's time to act
 """
-import json
-from typing import Optional, List
+from typing import List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from collections import Counter
 
-from app.models.claw import Claw
-from app.models.user import User
-from app.models.location import Location, UserLocationPattern, UserTimePattern
+from app.models.claw_sqlite import Claw
+from app.models.strike_pattern import StrikePattern
+from app.core.config import ICELANDIC_STORES
 
 
 class NotificationService:
@@ -32,85 +32,95 @@ class NotificationService:
         
         notifications = []
         
-        # Get active claws with location triggers
+        # Check if user is near any Icelandic stores
+        nearby_stores = []
+        for store in ICELANDIC_STORES:
+            distance = haversine(lat, lng, store["lat"], store["lng"])
+            if distance <= 200:  # 200m radius
+                nearby_stores.append({"store": store, "distance": distance})
+        
+        if not nearby_stores:
+            return notifications
+        
+        # Get active claws that might be relevant for shopping
         claws = db.query(Claw).filter(
             Claw.user_id == user_id,
             Claw.status == "active",
-            Claw.location_lat.isnot(None),
-            Claw.location_lng.isnot(None)
+            Claw.category.in_(["product", "grocery", "restaurant", "task"])
         ).all()
         
         for claw in claws:
-            distance = haversine(lat, lng, claw.location_lat, claw.location_lng)
-            
-            if distance <= claw.location_radius_meters:
-                # Check if we already notified recently (prevent spam)
-                last_notified = claw.last_surfaced_at
-                if not last_notified or (datetime.utcnow() - last_notified) > timedelta(minutes=30):
-                    notifications.append({
+            # Check if we already notified recently (prevent spam)
+            last_notified = claw.last_surfaced_at
+            if not last_notified or (datetime.utcnow() - last_notified) > timedelta(minutes=30):
+                store_names = ", ".join([s["store"]["name"] for s in nearby_stores[:2]])
+                notifications.append({
+                    "claw_id": str(claw.id),
+                    "title": "🦀 CLAW Alert",
+                    "body": f"You're near {store_names}: {claw.title or claw.content}",
+                    "data": {
+                        "type": "geofence",
                         "claw_id": str(claw.id),
-                        "title": "🦀 CLAW Alert",
-                        "body": f"You're near {claw.location_name}: {claw.title or claw.content}",
-                        "data": {
-                            "type": "geofence",
-                            "claw_id": str(claw.id),
-                            "distance": round(distance)
-                        }
-                    })
-                    
-                    # Update last surfaced
-                    claw.last_surfaced_at = datetime.utcnow()
-                    claw.surface_count += 1
+                        "stores": [s["store"]["chain"] for s in nearby_stores]
+                    }
+                })
+                
+                # Update last surfaced
+                claw.last_surfaced_at = datetime.utcnow()
+                claw.surface_count += 1
         
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        
         return notifications
     
     @staticmethod
     def check_smart_time_notifications(user_id: str, db: Session) -> List[dict]:
         """
         Check if it's a good time to remind user based on learned patterns
+        Uses StrikePattern data to determine optimal times
         """
         notifications = []
         now = datetime.utcnow()
         current_hour = now.hour
         current_day = now.weekday()  # 0=Monday, 6=Sunday
         
-        # Get user's time patterns
-        patterns = db.query(UserTimePattern).filter(
-            UserTimePattern.user_id == user_id,
-            UserTimePattern.confidence > 0.5
+        # Get user's strike patterns
+        patterns = db.query(StrikePattern).filter(
+            StrikePattern.user_id == user_id
         ).all()
         
-        for pattern in patterns:
-            # Check if current time matches pattern
-            hour_match = False
-            if pattern.preferred_hour_start and pattern.preferred_hour_end:
-                hour_match = pattern.preferred_hour_start <= current_hour <= pattern.preferred_hour_end
+        if not patterns:
+            return notifications
+        
+        # Analyze patterns
+        day_counts = Counter(p.day_of_week for p in patterns)
+        hour_counts = Counter(p.hour_of_day for p in patterns)
+        
+        # Check if current time matches user's patterns
+        day_match = day_counts.get(current_day, 0) > len(patterns) * 0.2
+        hour_match = hour_counts.get(current_hour, 0) > len(patterns) * 0.2
+        
+        if day_match and hour_match:
+            # Find active claws
+            claws = db.query(Claw).filter(
+                Claw.user_id == user_id,
+                Claw.status == "active"
+            ).all()
             
-            day_match = True
-            if pattern.preferred_days:
-                days = [int(d) for d in pattern.preferred_days.split(',')]
-                day_match = current_day in days
-            
-            if hour_match and day_match:
-                # Find matching claws
-                claws = db.query(Claw).filter(
-                    Claw.user_id == user_id,
-                    Claw.status == "active",
-                    Claw.category == pattern.category
-                ).all()
-                
-                for claw in claws:
-                    notifications.append({
-                        "claw_id": str(claw.id),
-                        "title": "🦀 Perfect Time!",
-                        "body": f"This is when you usually {pattern.action_type}: {claw.title or claw.content}",
-                        "data": {
-                            "type": "smart_time",
-                            "claw_id": str(claw.id),
-                            "pattern": pattern.action_type
-                        }
-                    })
+            for claw in claws:
+                notifications.append({
+                    "claw_id": str(claw.id),
+                    "title": "🦀 Perfect Time!",
+                    "body": f"This is when you usually complete tasks: {claw.title or claw.content}",
+                    "data": {
+                        "type": "smart_time",
+                        "claw_id": str(claw.id)
+                    }
+                })
         
         return notifications
     
@@ -147,21 +157,20 @@ class NotificationService:
         return notifications
     
     @staticmethod
-    def create_calendar_event(claw: Claw, db: Session) -> dict:
+    def create_calendar_event(claw: Claw, db: Session = None) -> dict:
         """
         Generate calendar event data for a claw
         """
         return {
             "title": claw.title or claw.content,
             "description": f"Captured in CLAW: {claw.content}",
-            "start_time": claw.created_at.isoformat(),
-            "end_time": (claw.created_at + timedelta(hours=1)).isoformat(),
-            "location": claw.location_name,
+            "start_time": claw.created_at.isoformat() if claw.created_at else datetime.utcnow().isoformat(),
+            "end_time": ((claw.created_at or datetime.utcnow()) + timedelta(hours=1)).isoformat(),
             "reminder_minutes": 15
         }
     
     @staticmethod
-    def schedule_alarm(claw: Claw, scheduled_time: datetime, db: Session) -> dict:
+    def schedule_alarm(claw: Claw, scheduled_time: datetime, db: Session = None) -> dict:
         """
         Schedule an alarm/reminder for a claw
         """
