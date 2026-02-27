@@ -1,7 +1,7 @@
 """
 Database configuration - Supports SQLite (dev) and PostgreSQL (production)
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
@@ -74,7 +74,7 @@ def check_db_connection() -> bool:
     """Check if database connection is working"""
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         print(f"[Database] Connection failed: {e}")
