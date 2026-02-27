@@ -80,8 +80,8 @@ class ResetPasswordRequest(BaseModel):
 @router.post("/register", response_model=TokenResponse)
 @rate_limit(requests_per_minute=5)  # Limit registration attempts
 async def register(
-    request: UserRegister = Body(...), 
     http_request: Request,
+    request: UserRegister = Body(...), 
     db: Session = Depends(get_db)
 ):
     """
@@ -151,8 +151,8 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 @brute_force_protection(max_attempts=5, window_seconds=300)  # 5 attempts per 5 minutes
 async def login(
-    request: UserLogin = Body(...), 
     http_request: Request,
+    request: UserLogin = Body(...), 
     db: Session = Depends(get_db)
 ):
     """
