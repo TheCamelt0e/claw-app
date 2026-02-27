@@ -1,0 +1,36 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        working-directory: ./mobile
+        run: npm ci
+
+      - name: Build Android APK
+        working-directory: ./mobile
+        run: eas build --platform android --profile production --non-interactive
+
+      - name: Get Build URL
+        run: |
+          echo "Build started! Check status at: https://expo.dev/accounts/camelt0e/projects/claw-app/builds"
