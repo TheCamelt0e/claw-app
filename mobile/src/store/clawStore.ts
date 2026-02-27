@@ -63,53 +63,60 @@ interface ClawState {
   refreshSyncStatus: () => void;
 }
 
+// Track if listeners are already subscribed (prevents duplicate subscriptions on hot reload)
+let isSubscribed = false;
+
 export const useClawStore = create<ClawState>((set, get) => {
-  // Subscribe to transaction events for UI updates
-  onTransaction('transaction:confirmed', (tx: Transaction, result: any) => {
-    set((state) => {
-      // Replace optimistic claw with confirmed one
-      const updatedClaws = state.claws.map(c => {
-        if (c.transactionId === tx.id || c.id === tx.optimisticId) {
-          return {
-            ...c,
-            id: tx.confirmedId || c.id,
-            status: 'active' as const,
-            isOptimistic: false,
-            transactionId: undefined,
-            ...result.claw, // Merge server response
-          };
-        }
-        return c;
+  // Subscribe to transaction events for UI updates (only once)
+  if (!isSubscribed) {
+    isSubscribed = true;
+    
+    onTransaction('transaction:confirmed', (tx: Transaction, result: any) => {
+      set((state) => {
+        // Replace optimistic claw with confirmed one
+        const updatedClaws = state.claws.map(c => {
+          if (c.transactionId === tx.id || c.id === tx.optimisticId) {
+            return {
+              ...c,
+              id: tx.confirmedId || c.id,
+              status: 'active' as const,
+              isOptimistic: false,
+              transactionId: undefined,
+              ...result.claw, // Merge server response
+            };
+          }
+          return c;
+        });
+
+        // Remove struck/released items
+        const cleanedClaws = updatedClaws.filter(c => {
+          if (c.transactionId === tx.id && (tx.type === 'STRIKE' || tx.type === 'RELEASE')) {
+            return false;
+          }
+          return true;
+        });
+
+        return { claws: cleanedClaws };
       });
 
-      // Remove struck/released items
-      const cleanedClaws = updatedClaws.filter(c => {
-        if (c.transactionId === tx.id && (tx.type === 'STRIKE' || tx.type === 'RELEASE')) {
-          return false;
-        }
-        return true;
-      });
-
-      return { claws: cleanedClaws };
+      // Refresh sync status
+      get().refreshSyncStatus();
     });
 
-    // Refresh sync status
-    get().refreshSyncStatus();
-  });
-
-  onTransaction('transaction:failed', (tx: Transaction) => {
-    set((state) => {
-      // Mark failed items
-      const updatedClaws = state.claws.map(c => {
-        if (c.transactionId === tx.id) {
-          return { ...c, status: 'expired' as const, isOptimistic: false };
-        }
-        return c;
+    onTransaction('transaction:failed', (tx: Transaction) => {
+      set((state) => {
+        // Mark failed items
+        const updatedClaws = state.claws.map(c => {
+          if (c.transactionId === tx.id) {
+            return { ...c, status: 'expired' as const, isOptimistic: false };
+          }
+          return c;
+        });
+        return { claws: updatedClaws };
       });
-      return { claws: updatedClaws };
+      get().refreshSyncStatus();
     });
-    get().refreshSyncStatus();
-  });
+  }
 
   return {
     claws: [],

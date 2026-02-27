@@ -55,6 +55,8 @@ export default function StrikeScreen({ navigation }: any) {
   const [smartClaws, setSmartClaws] = useState<SmartSurfaceItem[]>([]);
   const [patterns, setPatterns] = useState<UserPatterns | null>(null);
   const [useSmartOrder, setUseSmartOrder] = useState(true);
+  const [smartSurfaceError, setSmartSurfaceError] = useState<string | null>(null);
+  const [isLoadingSmart, setIsLoadingSmart] = useState(false);
   
   // Oracle Moment (Dopamine hit)
   const [showOracle, setShowOracle] = useState(false);
@@ -107,14 +109,23 @@ export default function StrikeScreen({ navigation }: any) {
     }
   };
 
-  // Load smart surface data
+  // Load smart surface data with error handling
   const loadSmartSurface = async () => {
-    const [claws, userPatterns] = await Promise.all([
-      getSmartSurface(true, 20),
-      getUserPatterns()
-    ]);
-    setSmartClaws(claws);
-    setPatterns(userPatterns);
+    try {
+      setIsLoadingSmart(true);
+      setSmartSurfaceError(null);
+      const [claws, userPatterns] = await Promise.all([
+        getSmartSurface(true, 20),
+        getUserPatterns()
+      ]);
+      setSmartClaws(claws);
+      setPatterns(userPatterns);
+    } catch (error) {
+      console.error('Smart surface error:', error);
+      setSmartSurfaceError('Could not load smart suggestions');
+    } finally {
+      setIsLoadingSmart(false);
+    }
   };
 
   useEffect(() => {

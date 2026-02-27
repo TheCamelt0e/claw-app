@@ -3,6 +3,7 @@
  * Smart content analysis with Gemini AI
  */
 import { apiRequest } from '../api/client';
+import { Claw } from '../store/clawStore';
 
 export interface SmartAnalysisRequest {
   content: string;
@@ -42,7 +43,7 @@ export interface AIStatus {
 
 export interface RelatedClawsResponse {
   related_ids: string[];
-  related_claws: any[];
+  related_claws: Claw[];
   count: number;
 }
 

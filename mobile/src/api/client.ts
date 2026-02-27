@@ -10,9 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PRODUCTION_API_URL = 'https://claw-api-b5ts.onrender.com/api/v1';
 const DEVELOPMENT_API_URL = 'http://localhost:8000/api/v1';
 
-// Always use production URL for APK builds
-// Change this to DEVELOPMENT_API_URL only for local testing
-const API_BASE_URL = PRODUCTION_API_URL;
+// Use development URL in dev mode, production for release builds
+const API_BASE_URL = __DEV__ ? DEVELOPMENT_API_URL : PRODUCTION_API_URL;
 
 console.log('[CLAW] API URL:', API_BASE_URL);
 

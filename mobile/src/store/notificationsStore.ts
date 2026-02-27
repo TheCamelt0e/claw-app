@@ -140,6 +140,8 @@ export const useNotificationsStore = create<NotificationState>((set, get) => ({
 
   fetchSuggestions: async () => {
     set({ isLoading: true });
+    const abortController = new AbortController();
+    
     try {
       // Check location status first
       await get().checkLocationStatus();
@@ -147,15 +149,17 @@ export const useNotificationsStore = create<NotificationState>((set, get) => ({
       // Generate local suggestions immediately
       await get().generateLocalSuggestions();
       
-      // Also try to get from API (but don't wait for it)
-      apiRequest<any>('GET', '/notifications/smart-suggestions')
+      // Also try to get from API (with abort support)
+      apiRequest<any>('GET', '/notifications/smart-suggestions', undefined, undefined, 10000)
         .then((data) => {
           if (data.notifications && data.notifications.length > 0) {
             set({ suggestions: data.notifications, isLoading: false });
           }
         })
-        .catch(() => {
-          set({ isLoading: false });
+        .catch((err) => {
+          if (err.name !== 'AbortError') {
+            set({ isLoading: false });
+          }
         });
     } catch (error) {
       console.error('Error fetching suggestions:', error);
@@ -163,6 +167,9 @@ export const useNotificationsStore = create<NotificationState>((set, get) => ({
       await get().generateLocalSuggestions();
       set({ error: 'Failed to fetch suggestions', isLoading: false });
     }
+    
+    // Return cleanup function for component unmount
+    return () => abortController.abort();
   },
 
   // Generate suggestions locally based on time/behavior

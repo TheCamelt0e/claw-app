@@ -205,7 +205,8 @@ export default function CaptureScreen() {
         cleanupSubscriptions();
         setIsRecording(false);
         stopPulse();
-        Alert.alert('Voice Error', event.message || 'Could not recognize speech. Please try again.');
+        const errorMessage = event?.message || event?.error?.message || 'Could not recognize speech. Please try again.';
+        Alert.alert('Voice Error', errorMessage);
       });
 
       const endSub = speechEmitter.addListener('end', () => {
@@ -311,6 +312,9 @@ export default function CaptureScreen() {
   const handleCapture = useCallback(async () => {
     if (!content.trim()) return;
     
+    // Clear interim text first to prevent UI mismatch during processing
+    setInterimText('');
+    
     // Haptic: Capture initiated
     await playVocab('captureSuccess');
     setIsCapturing(true);
@@ -414,7 +418,7 @@ export default function CaptureScreen() {
       setIsCapturing(false);
       setAiStatus('idle');
     }
-  }, [content, isPriority, captureClaw]);
+  }, [content, isPriority, isSomeday, captureClaw, setLastCapture, setLastAnalysis]);
 
   const handleSuggestionPress = useCallback((suggestion: string, index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

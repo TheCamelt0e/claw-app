@@ -67,8 +67,13 @@ const ClawCard = memo(({ item, activeFilter, onMoreOptions }: ClawCardProps) => 
     return CATEGORY_ICONS[category || ''] || 'document-text';
   };
   
-  const handlePress = useCallback(() => {
-    onMoreOptions(item);
+  const handlePress = useCallback(async () => {
+    try {
+      await onMoreOptions(item);
+    } catch (error) {
+      console.error('Action error:', error);
+      Alert.alert('Error', 'Could not perform action');
+    }
   }, [item, onMoreOptions]);
   
   return (

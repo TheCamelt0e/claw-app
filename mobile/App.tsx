@@ -21,6 +21,7 @@ import { requestGeofencePermissions, startGeofencing } from './src/service/geofe
 import CaptureScreen from './src/screens/CaptureScreen';
 import StrikeScreen from './src/screens/StrikeScreen';
 import VaultScreen from './src/screens/VaultScreen';
+import SurfaceScreen from './src/screens/SurfaceScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import GroupsScreen from './src/screens/GroupsScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -74,6 +75,8 @@ function MainTabs() {
             iconName = focused ? 'flash' : 'flash-outline';
           } else if (route.name === 'Vault') {
             iconName = focused ? 'archive' : 'archive-outline';
+          } else if (route.name === 'Groups') {
+            iconName = focused ? 'people' : 'people-outline';
           } else if (route.name === 'Profile') {
             iconName = focused ? 'person' : 'person-outline';
           }
@@ -150,6 +153,7 @@ function MainStack() {
       }}
     >
       <Stack.Screen name="Tabs" component={MainTabs} />
+      <Stack.Screen name="Surface" component={SurfaceScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="ExpirySettings" component={ExpirySettingsScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />

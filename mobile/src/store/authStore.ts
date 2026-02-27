@@ -146,7 +146,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       // Check if token is expired or about to expire (within 5 minutes)
-      const expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
+      let expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
+      if (isNaN(expiresAt)) {
+        expiresAt = 0;
+      }
       const isExpired = Date.now() >= (expiresAt - 5 * 60 * 1000);
       
       if (isExpired) {
