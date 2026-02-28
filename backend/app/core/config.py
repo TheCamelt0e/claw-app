@@ -117,6 +117,8 @@ class Settings(BaseSettings):
             "ionic://localhost",      # Android mobile app
             "http://localhost:3000",  # Local development
             "http://localhost:8100",
+            "null",                   # React Native fetch origin (APK builds)
+            "file://",                # File protocol
         ]
         
         # Add any additional origins from environment
