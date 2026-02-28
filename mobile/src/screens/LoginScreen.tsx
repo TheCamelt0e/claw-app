@@ -58,12 +58,15 @@ export default function LoginScreen() {
     setError('');
 
     try {
+      Alert.alert('Debug', 'Starting login...');
       if (isLogin) {
         await login(email.trim(), password);
+        Alert.alert('Debug', 'Login function completed');
       } else {
         await register(email.trim(), password, displayName.trim());
       }
     } catch (err: any) {
+      Alert.alert('Catch Block Triggered', JSON.stringify(err));
       let errorMessage = 'Something went wrong. Please try again.';
       if (err?.message) {
         errorMessage = err.message;

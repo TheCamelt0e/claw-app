@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from 'react-native';
 import { authAPI } from '../api/client';
 
 interface User {
@@ -87,14 +88,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     } catch (error: any) {
-      console.error('[Auth] Login error:', error?.message || error);
+      const errorMsg = error?.message || error?.detail || JSON.stringify(error) || 'Login failed';
+      console.error('[Auth] Login error:', errorMsg);
+      Alert.alert('Login Failed (AuthStore)', errorMsg);
       set({ 
-        error: error?.message || 'Login failed',
+        error: errorMsg,
         isLoading: false,
         isAuthenticated: false,
         user: null,
       });
-      throw new Error(error?.message || 'Login failed');
+      throw new Error(errorMsg);
     }
   },
 
