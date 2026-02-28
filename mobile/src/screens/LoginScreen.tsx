@@ -36,62 +36,58 @@ export default function LoginScreen() {
   };
 
   const handleSubmit = async () => {
-    Alert.alert('Debug', 'Step 1: handleSubmit called');
-    
-    // Validation
-    if (!isLogin && !displayName.trim()) {
-      Alert.alert('Debug', 'Validation failed: no display name');
-      setError('Please enter your name');
-      return;
-    }
-    if (!email.trim()) {
-      Alert.alert('Debug', 'Validation failed: no email');
-      setError('Please enter your email');
-      return;
-    }
-    if (!validateEmail(email)) {
-      Alert.alert('Debug', 'Validation failed: invalid email');
-      setError('Please enter a valid email address');
-      return;
-    }
-    if (password.length < 6) {
-      Alert.alert('Debug', 'Validation failed: password too short');
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    Alert.alert('Debug', 'Step 2: Validation passed');
+    // Use console first (more reliable than Alert)
+    console.log('[LOGIN] Step 1: handleSubmit called');
     
     try {
+      // Validation
+      if (!isLogin && !displayName.trim()) {
+        console.log('[LOGIN] Validation failed: no display name');
+        setError('Please enter your name');
+        return;
+      }
+      if (!email.trim()) {
+        console.log('[LOGIN] Validation failed: no email');
+        setError('Please enter your email');
+        return;
+      }
+      if (!validateEmail(email)) {
+        console.log('[LOGIN] Validation failed: invalid email');
+        setError('Please enter a valid email address');
+        return;
+      }
+      if (password.length < 6) {
+        console.log('[LOGIN] Validation failed: password too short');
+        setError('Password must be at least 6 characters');
+        return;
+      }
+
+      console.log('[LOGIN] Step 2: Validation passed');
       setIsLoading(true);
       setError('');
-      Alert.alert('Debug', 'Step 3: Starting login...');
+      
+      console.log('[LOGIN] Step 3: About to call login function');
       if (isLogin) {
+        console.log('[LOGIN] Calling login API...');
         await login(email.trim(), password);
-        Alert.alert('Debug', 'Login function completed');
+        console.log('[LOGIN] Login function completed successfully');
       } else {
+        console.log('[LOGIN] Calling register API...');
         await register(email.trim(), password, displayName.trim());
       }
     } catch (err: any) {
       // Debug: Log full error details
-      console.error('Login error object:', err);
-      console.error('Login error type:', typeof err);
-      console.error('Login error keys:', Object.keys(err || {}));
+      console.error('[LOGIN] CATCH BLOCK - Error:', err);
+      console.error('[LOGIN] Error type:', typeof err);
+      console.error('[LOGIN] Error keys:', Object.keys(err || {}));
+      console.error('[LOGIN] Error message:', err?.message);
+      console.error('[LOGIN] Error stack:', err?.stack);
       
-      const errorDetails = `Step: CATCH BLOCK\nType: ${typeof err}\nKeys: ${Object.keys(err || {}).join(', ')}\nString: ${String(err)}\nJSON: ${JSON.stringify(err)}`;
-      Alert.alert('Debug: Full Error', errorDetails);
+      // Show error in Alert
+      const errorMsg = err?.message || err?.detail || String(err) || 'Unknown error';
+      Alert.alert('Login Error', errorMsg);
       
-      let errorMessage = 'Something went wrong. Please try again.';
-      if (err?.message) {
-        errorMessage = err.message;
-      } else if (err?.detail) {
-        errorMessage = err.detail;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else {
-        errorMessage = 'Network error - cannot connect to server';
-      }
-      setError(errorMessage);
+      setError(errorMsg);
     } finally {
       setIsLoading(false);
     }
