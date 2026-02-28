@@ -70,16 +70,16 @@ app = FastAPI(
     openapi_url=openapi_url,
 )
 
-# CORS middleware - properly configured for environment
-cors_origins = settings.get_cors_origins()
+# CORS middleware - NUCLEAR OPTION for React Native compatibility
+# WARNING: This allows all origins. Revert to whitelist after fixing mobile issues.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],  # Allow all headers for React Native compatibility
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["*"],
-    max_age=600,  # Cache preflight for 10 minutes
+    max_age=600,
 )
 
 # Include API routes
