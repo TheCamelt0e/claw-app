@@ -36,29 +36,36 @@ export default function LoginScreen() {
   };
 
   const handleSubmit = async () => {
+    Alert.alert('Debug', 'Step 1: handleSubmit called');
+    
     // Validation
     if (!isLogin && !displayName.trim()) {
+      Alert.alert('Debug', 'Validation failed: no display name');
       setError('Please enter your name');
       return;
     }
     if (!email.trim()) {
+      Alert.alert('Debug', 'Validation failed: no email');
       setError('Please enter your email');
       return;
     }
     if (!validateEmail(email)) {
+      Alert.alert('Debug', 'Validation failed: invalid email');
       setError('Please enter a valid email address');
       return;
     }
     if (password.length < 6) {
+      Alert.alert('Debug', 'Validation failed: password too short');
       setError('Password must be at least 6 characters');
       return;
     }
 
-    setIsLoading(true);
-    setError('');
-
+    Alert.alert('Debug', 'Step 2: Validation passed');
+    
     try {
-      Alert.alert('Debug', 'Starting login...');
+      setIsLoading(true);
+      setError('');
+      Alert.alert('Debug', 'Step 3: Starting login...');
       if (isLogin) {
         await login(email.trim(), password);
         Alert.alert('Debug', 'Login function completed');
@@ -71,7 +78,7 @@ export default function LoginScreen() {
       console.error('Login error type:', typeof err);
       console.error('Login error keys:', Object.keys(err || {}));
       
-      const errorDetails = `Type: ${typeof err}\nKeys: ${Object.keys(err || {}).join(', ')}\nString: ${String(err)}\nJSON: ${JSON.stringify(err)}`;
+      const errorDetails = `Step: CATCH BLOCK\nType: ${typeof err}\nKeys: ${Object.keys(err || {}).join(', ')}\nString: ${String(err)}\nJSON: ${JSON.stringify(err)}`;
       Alert.alert('Debug: Full Error', errorDetails);
       
       let errorMessage = 'Something went wrong. Please try again.';
