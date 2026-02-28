@@ -61,8 +61,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email: string, password: string) => {
     try {
       set({ isLoading: true, error: null });
+      console.log('[Auth] Starting login for:', email);
       
       const response = await authAPI.login(email, password);
+      console.log('[Auth] Login API success');
       const { access_token, expires_in } = response;
       
       // Calculate expiration timestamp
@@ -71,9 +73,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Store token and expiration
       await AsyncStorage.setItem(TOKEN_KEY, access_token);
       await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
+      console.log('[Auth] Token stored successfully');
       
       // Get user data
+      console.log('[Auth] Fetching user data...');
       const meResponse = await authAPI.getMe();
+      console.log('[Auth] User data received:', meResponse.email);
       
       set({
         user: meResponse,
@@ -82,7 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     } catch (error: any) {
-      console.error('Login error:', error?.message || error);
+      console.error('[Auth] Login error:', error?.message || error);
       set({ 
         error: error?.message || 'Login failed',
         isLoading: false,
@@ -137,10 +142,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   checkAuth: async () => {
     try {
+      console.log('[Auth] Checking auth status...');
       const token = await AsyncStorage.getItem(TOKEN_KEY);
       const expiresAtStr = await AsyncStorage.getItem(TOKEN_EXPIRES_KEY);
+      console.log('[Auth] Token exists:', !!token);
       
       if (!token) {
+        console.log('[Auth] No token found');
         set({ isLoading: false, isAuthenticated: false });
         return;
       }
@@ -162,14 +170,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       // Get user data
+      console.log('[Auth] Fetching user data with stored token...');
       const meResponse = await authAPI.getMe();
+      console.log('[Auth] Auth check successful');
       set({
         user: meResponse,
         isAuthenticated: true,
         isLoading: false,
       });
-    } catch (error) {
-      console.error('Check auth error:', error);
+    } catch (error: any) {
+      console.error('[Auth] Check auth error:', error?.message || error);
       await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRES_KEY]);
       set({ 
         isLoading: false, 
