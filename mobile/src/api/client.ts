@@ -209,8 +209,13 @@ export async function apiRequest<T>(
     return response.json();
   } catch (error: any) {
     clearTimeout(timeoutId);
+    console.error('[API] Request failed:', error);
     if (error.name === 'AbortError') {
       throw new Error('Request timed out. Please check your connection.');
+    }
+    // Better error for network failures
+    if (!error.message || error.message === '') {
+      throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Check connection/CORS.`);
     }
     throw error;
   }

@@ -66,7 +66,14 @@ export default function LoginScreen() {
         await register(email.trim(), password, displayName.trim());
       }
     } catch (err: any) {
-      Alert.alert('Catch Block Triggered', JSON.stringify(err));
+      // Debug: Log full error details
+      console.error('Login error object:', err);
+      console.error('Login error type:', typeof err);
+      console.error('Login error keys:', Object.keys(err || {}));
+      
+      const errorDetails = `Type: ${typeof err}\nKeys: ${Object.keys(err || {}).join(', ')}\nString: ${String(err)}\nJSON: ${JSON.stringify(err)}`;
+      Alert.alert('Debug: Full Error', errorDetails);
+      
       let errorMessage = 'Something went wrong. Please try again.';
       if (err?.message) {
         errorMessage = err.message;
@@ -74,6 +81,8 @@ export default function LoginScreen() {
         errorMessage = err.detail;
       } else if (typeof err === 'string') {
         errorMessage = err;
+      } else {
+        errorMessage = 'Network error - cannot connect to server';
       }
       setError(errorMessage);
     } finally {
