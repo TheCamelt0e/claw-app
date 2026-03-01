@@ -107,33 +107,39 @@ app.add_middleware(
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     """Add security headers and logging to all requests"""
-    from fastapi.responses import JSONResponse
-    
-    # Skip security checks for health endpoint
-    if request.url.path == "/health" or request.url.path == "/":
-        response = await call_next(request)
-        return response
-    
-    # Log security event for monitoring
-    fingerprint = APISecurity.get_device_fingerprint(request)
-    
-    # Add request ID for tracing
     request_id = secrets.token_hex(8)
     
-    # Process request
-    response = await call_next(request)
-    
-    # Add security headers
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["X-Request-ID"] = request_id
-    
-    # Remove server fingerprinting
-    response.headers.pop("server", None)
-    
-    return response
+    try:
+        # Skip security checks for health endpoint
+        if request.url.path == "/health" or request.url.path == "/":
+            response = await call_next(request)
+            return response
+        
+        # Process request first (don't block on fingerprinting)
+        response = await call_next(request)
+        
+        # Add security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-Request-ID"] = request_id
+        
+        # Only add HSTS in production
+        if settings.is_production():
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # Remove server fingerprinting
+        response.headers.pop("server", None)
+        
+        return response
+        
+    except Exception as e:
+        # Log error but don't crash the request
+        print(f"[ERROR] Security middleware failed: {e}")
+        # Still try to return the response
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 # Include API routes
