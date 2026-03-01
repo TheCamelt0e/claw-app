@@ -72,35 +72,16 @@ app = FastAPI(
     openapi_url=openapi_url,
 )
 
-# CORS middleware - SECURE with React Native support
-# Whitelist approach: only allow known origins
+# CORS middleware - PERMISSIVE for React Native mobile apps
+# React Native sends Origin: null which doesn't work well with whitelist + credentials
+# Security is enforced via JWT tokens, not CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://claw.app",
-        "https://www.claw.app",
-        "capacitor://localhost",     # iOS apps
-        "ionic://localhost",         # Android apps (Capacitor)
-        "http://localhost:3000",     # Local web dev
-        "http://localhost:19006",    # Expo web
-        "http://localhost:8081",     # Metro bundler
-        "null",                      # React Native fetch origin (APK builds)
-        "file://",                   # File protocol
-        "https://claw-api-b5ts.onrender.com",  # Self-reference
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type", 
-        "X-Requested-With",
-        "Accept",
-        "Origin",
-        "X-API-Key",              # For API key auth
-        "X-Device-ID",            # For device tracking
-    ],
+    allow_origins=["*"],  # Allow all origins for mobile app compatibility
+    allow_credentials=False,  # Must be False with allow_origins=["*"]
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["X-RateLimit-Remaining", "X-Request-ID"],
-    max_age=600,
 )
 
 # Security middleware - log all requests
