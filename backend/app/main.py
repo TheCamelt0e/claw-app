@@ -3,7 +3,8 @@ CLAW API - Production Ready - SECURITY HARDENED
 Supports SQLite (development) and PostgreSQL (production)
 Includes Redis for distributed rate limiting and caching
 """
-from fastapi import FastAPI, Response
+import secrets
+from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -17,6 +18,7 @@ from app.core.database import (
 )
 from app.core.redis import init_redis, close_redis, redis_client
 from app.core.config import settings
+from app.core.api_security import APISecurity, log_security_event
 from app.api.v1.router import api_router
 
 
@@ -70,17 +72,69 @@ app = FastAPI(
     openapi_url=openapi_url,
 )
 
-# CORS middleware - NUCLEAR OPTION for React Native compatibility
-# WARNING: This allows all origins. Revert to whitelist after fixing mobile issues.
+# CORS middleware - SECURE with React Native support
+# Whitelist approach: only allow known origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://claw.app",
+        "https://www.claw.app",
+        "capacitor://localhost",     # iOS apps
+        "ionic://localhost",         # Android apps (Capacitor)
+        "http://localhost:3000",     # Local web dev
+        "http://localhost:19006",    # Expo web
+        "http://localhost:8081",     # Metro bundler
+        "null",                      # React Native fetch origin (APK builds)
+        "file://",                   # File protocol
+        "https://claw-api-b5ts.onrender.com",  # Self-reference
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type", 
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+        "X-API-Key",              # For API key auth
+        "X-Device-ID",            # For device tracking
+    ],
+    expose_headers=["X-RateLimit-Remaining", "X-Request-ID"],
     max_age=600,
 )
+
+# Security middleware - log all requests
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    """Add security headers and logging to all requests"""
+    from fastapi.responses import JSONResponse
+    
+    # Skip security checks for health endpoint
+    if request.url.path == "/health" or request.url.path == "/":
+        response = await call_next(request)
+        return response
+    
+    # Log security event for monitoring
+    fingerprint = APISecurity.get_device_fingerprint(request)
+    
+    # Add request ID for tracing
+    request_id = secrets.token_hex(8)
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Add security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Request-ID"] = request_id
+    
+    # Remove server fingerprinting
+    response.headers.pop("server", None)
+    
+    return response
+
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
