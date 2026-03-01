@@ -27,10 +27,13 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [localError, setLocalError] = useState('');
   const [info, setInfo] = useState('');
 
-  const { login, register } = useAuthStore();
+  const { login, register, error: authError } = useAuthStore();
+  
+  // Use auth store error if available (for server wake messages), otherwise local
+  const error = authError || localError;
   const navigation = useNavigation();
 
   const validateEmail = (email: string) => {
@@ -45,29 +48,29 @@ export default function LoginScreen() {
       // Validation
       if (!isLogin && !displayName.trim()) {
         console.log('[LOGIN] Validation failed: no display name');
-        setError('Please enter your name');
+        setLocalError('Please enter your name');
         return;
       }
       if (!email.trim()) {
         console.log('[LOGIN] Validation failed: no email');
-        setError('Please enter your email');
+        setLocalError('Please enter your email');
         return;
       }
       if (!validateEmail(email)) {
         console.log('[LOGIN] Validation failed: invalid email');
-        setError('Please enter a valid email address');
+        setLocalError('Please enter a valid email address');
         return;
       }
       if (password.length < 8) {
         console.log('[LOGIN] Validation failed: password too short');
-        setError('Password must be at least 8 characters');
+        setLocalError('Password must be at least 8 characters');
         return;
       }
 
       console.log('[LOGIN] Step 2: Validation passed');
       setIsLoading(true);
-      setError('');
-      setInfo('Connecting to server...');
+      setLocalError('');
+      setInfo('Starting login...');
       
       console.log('[LOGIN] Step 3: About to call login function');
       if (isLogin) {
@@ -91,14 +94,14 @@ export default function LoginScreen() {
       const errorMsg = err?.message || err?.detail || String(err) || 'Unknown error';
       
       // Check if it's a server wake timeout - show nicer message
-      if (errorMsg.includes('taking too long') || errorMsg.includes('timed out')) {
+      if (errorMsg.includes('waking up') || errorMsg.includes('timed out')) {
         setInfo('');
-        setError('Server is waking up. This takes ~30s on first load. Please try again.');
-        Alert.alert('Server Waking Up', 'The server is starting (takes ~30s). Please try again in a moment.');
+        setLocalError('Server was sleeping. Please tap Sign In again!');
+        // Don't show Alert - let them retry immediately
       } else {
         setInfo('');
         Alert.alert('Login Error', errorMsg);
-        setError(errorMsg);
+        setLocalError(errorMsg);
       }
     } finally {
       setIsLoading(false);
@@ -107,7 +110,7 @@ export default function LoginScreen() {
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
-    setError('');
+    setLocalError('');
   };
 
   return (
@@ -205,9 +208,13 @@ export default function LoginScreen() {
             ) : null}
 
             {error ? (
-              <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle" size={18} color="#e94560" />
-                <Text style={styles.errorText}>{error}</Text>
+              <View style={[styles.errorContainer, error.includes('ready') || error.includes('Waking') ? styles.infoErrorContainer : null]}>
+                <Ionicons 
+                  name={error.includes('ready') ? "checkmark-circle" : "alert-circle"} 
+                  size={18} 
+                  color={error.includes('ready') ? "#4CAF50" : "#e94560"} 
+                />
+                <Text style={[styles.errorText, error.includes('ready') ? styles.infoErrorText : null]}>{error}</Text>
               </View>
             ) : null}
 
@@ -410,6 +417,12 @@ const styles = StyleSheet.create({
     color: '#FF6B35',
     flex: 1,
     fontSize: 14,
+  },
+  infoErrorContainer: {
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  infoErrorText: {
+    color: '#4CAF50',
   },
   button: {
     borderRadius: 12,

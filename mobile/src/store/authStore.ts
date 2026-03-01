@@ -71,15 +71,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Wake up server (Render free tier cold start)
       console.log('[AUTH] Step 0: Waking up server...');
       const serverReady = await waitForServer(
-        (attempt, max) => {
-          set({ error: `Server waking up... (${attempt}/${max})` });
+        (message) => {
+          set({ error: message });
         },
-        12 // 60 seconds max
+        15 // 75 seconds max
       );
       
       if (!serverReady) {
-        throw new Error('[TIMEOUT] Server is taking too long to start. Please try again in a moment.');
+        throw new Error('[TIMEOUT] Server is still waking up. Please try again in 10 seconds.');
       }
+      
+      console.log('[AUTH] Server is awake, proceeding with login...');
+      set({ error: 'Server ready! Logging in...' });
       
       console.log('[AUTH] Step 1: Calling login API...');
       const response = await authAPI.login(email, password);
@@ -172,15 +175,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Wake up server (Render free tier cold start)
       console.log('[AUTH] Step 0: Waking up server...');
       const serverReady = await waitForServer(
-        (attempt, max) => {
-          set({ error: `Server waking up... (${attempt}/${max})` });
+        (message) => {
+          set({ error: message });
         },
-        12 // 60 seconds max
+        15 // 75 seconds max
       );
       
       if (!serverReady) {
-        throw new Error('[TIMEOUT] Server is taking too long to start. Please try again in a moment.');
+        throw new Error('[TIMEOUT] Server is still waking up. Please try again in 10 seconds.');
       }
+      
+      set({ error: 'Server ready! Creating account...' });
       
       const response = await authAPI.register(email, password, displayName);
       const { access_token, expires_in } = response;

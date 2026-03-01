@@ -1,5 +1,5 @@
 /**
- * Server Wake Service
+ * Server Wake Service - FIXED VERSION
  * 
  * Render free tier spins down after inactivity.
  * This service pings the server to wake it up before auth operations.
@@ -10,21 +10,28 @@ import { API_BASE_URL } from '../api/client';
 // Health endpoint is at root, not /api/v1
 const BASE_URL = API_BASE_URL.replace('/api/v1', '');
 
-const WAKE_TIMEOUT = 5000; // 5s for wake ping (fast)
-const MAX_WAKE_RETRIES = 3;
+const WAKE_TIMEOUT = 8000; // 8s for wake ping
 
 /**
- * Ping the server to wake it up from cold start
- * Returns true if server is awake, false otherwise
+ * Wait for server to be ready with progress callback
+ * Tries health endpoint first, then actual API endpoint
  */
-export async function wakeServer(): Promise<boolean> {
-  console.log('[ServerWake] Pinging server to wake up...');
+export async function waitForServer(
+  onProgress?: (message: string) => void,
+  maxAttempts: number = 15 // 75 seconds total
+): Promise<boolean> {
+  console.log('[ServerWake] Starting server wake sequence...');
+  onProgress?.('Waking up server...');
   
-  for (let attempt = 1; attempt <= MAX_WAKE_RETRIES; attempt++) {
+  // Phase 1: Wake health endpoint
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    onProgress?.(`Waking server... (${attempt}/8)`);
+    
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), WAKE_TIMEOUT);
       
+      console.log(`[ServerWake] Health ping attempt ${attempt}...`);
       const response = await fetch(`${BASE_URL}/health`, {
         method: 'GET',
         signal: controller.signal,
@@ -33,60 +40,49 @@ export async function wakeServer(): Promise<boolean> {
       clearTimeout(timeoutId);
       
       if (response.ok) {
-        console.log('[ServerWake] Server is awake!');
-        return true;
+        console.log('[ServerWake] Health endpoint is awake!');
+        break; // Health is up, now check API
       }
     } catch (error: any) {
-      console.log(`[ServerWake] Attempt ${attempt} failed:`, error.name);
-      
-      if (attempt < MAX_WAKE_RETRIES) {
-        // Wait before retry (exponential backoff)
-        await new Promise(r => setTimeout(r, attempt * 1000));
-      }
+      console.log(`[ServerWake] Health attempt ${attempt} failed: ${error.name}`);
     }
+    
+    // Wait before next attempt
+    await new Promise(r => setTimeout(r, 3000));
   }
   
-  console.log('[ServerWake] Server wake failed after retries');
-  return false;
-}
-
-/**
- * Wait for server to be ready with progress callback
- * Useful for showing "Server waking up..." UI
- */
-export async function waitForServer(
-  onProgress?: (attempt: number, maxAttempts: number) => void,
-  maxAttempts: number = 12 // 60 seconds total (5s * 12)
-): Promise<boolean> {
-  console.log('[ServerWake] Waiting for server to be ready...');
+  // Phase 2: Verify actual API is responding
+  onProgress?.('Checking API...');
   
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    onProgress?.(attempt, maxAttempts);
+  for (let attempt = 1; attempt <= 7; attempt++) {
+    onProgress?.(`Checking API... (${attempt}/7)`);
     
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), WAKE_TIMEOUT);
       
-      const response = await fetch(`${BASE_URL}/health`, {
-        method: 'GET',
+      console.log(`[ServerWake] API check attempt ${attempt}...`);
+      // Try to hit the actual API root - this verifies the app is fully loaded
+      const response = await fetch(`${BASE_URL}/`, {
+        method: 'HEAD',
         signal: controller.signal,
       });
       
       clearTimeout(timeoutId);
       
-      if (response.ok) {
-        console.log(`[ServerWake] Server ready after ${attempt} attempts`);
+      if (response.ok || response.status === 405) { // 405 is OK - means endpoint exists
+        console.log('[ServerWake] API is fully awake and ready!');
         return true;
       }
-    } catch (error) {
-      // Expected if server is still waking up
+    } catch (error: any) {
+      console.log(`[ServerWake] API check ${attempt} failed: ${error.name}`);
     }
     
-    // Wait 5 seconds between attempts
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 3000));
   }
   
+  console.log('[ServerWake] Server wake failed after all attempts');
   return false;
 }
 
-export default { wakeServer, waitForServer };
+export default { waitForServer };

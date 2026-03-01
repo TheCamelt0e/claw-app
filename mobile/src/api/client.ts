@@ -240,14 +240,14 @@ export interface VerifyEmailResponse {
 
 export const authAPI = {
   login: (email: string, password: string) =>
-    apiRequest<LoginResponse>('POST', '/auth/login', { email, password }),
+    apiRequest<LoginResponse>('POST', '/auth/login', { email, password }, undefined, 90000), // 90s for cold start
   
   register: (email: string, password: string, displayName: string) =>
     apiRequest<LoginResponse>('POST', '/auth/register', { 
       email, 
       password, 
       display_name: displayName 
-    }),
+    }, undefined, 90000), // 90s for cold start
   
   getMe: () =>
     apiRequest<User>('GET', '/auth/me'),
