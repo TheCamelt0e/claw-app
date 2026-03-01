@@ -131,10 +131,6 @@ async def register(
     db.commit()
     db.refresh(new_user)
     
-    # Clear any failed attempts for this IP
-    client_ip = get_client_ip(http_request)
-    rate_limiter.clear_failed_attempts(client_ip)
-    
     # Send verification email (async - don't block registration)
     asyncio.create_task(
         email_service.send_verification_email(
@@ -183,8 +179,6 @@ async def login(
     ).first()
     
     if not user:
-        # Record failed attempt
-        rate_limiter.record_failed_attempt(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -193,16 +187,11 @@ async def login(
     
     # Verify password
     if not verify_password(request.password, user.hashed_password):
-        # Record failed attempt
-        rate_limiter.record_failed_attempt(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Clear failed attempts on successful login
-    rate_limiter.clear_failed_attempts(client_ip)
     
     # Update last active
     user.last_active_at = datetime.utcnow()
