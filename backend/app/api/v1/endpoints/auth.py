@@ -81,6 +81,13 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=100)
 
 
+# TEST ENDPOINT - no database
+@router.post("/test-ping")
+async def test_ping():
+    """Test endpoint without database"""
+    return {"status": "pong", "message": "POST works without DB"}
+
+
 @router.post("/register", response_model=TokenResponse)
 # @rate_limit(requests_per_minute=5)  # Temporarily disabled for testing
 async def register(
