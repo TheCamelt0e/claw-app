@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { authAPI } from '../api/client';
-import { waitForServer } from '../service/serverWake';
+import { waitForServer, isServerSleepingError, withRetry } from '../service/serverWake';
 
 interface User {
   id: string;
@@ -68,24 +68,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true, error: null });
       
-      // Wake up server (Render free tier cold start)
-      console.log('[AUTH] Step 0: Waking up server...');
+      // NOTE: With paid tier, server is always-on - no wake needed
+      // Keeping minimal check for development/local servers
+      console.log('[AUTH] Step 0: Checking server availability...');
+      
+      // Quick check only - server should respond immediately with paid tier
       const serverReady = await waitForServer(
         (message) => {
           set({ error: message });
         },
-        15 // 75 seconds max
+        3 // Only 3 quick attempts (6 seconds max)
       );
       
       if (!serverReady) {
-        throw new Error('[TIMEOUT] Server is still waking up. Please try again in 10 seconds.');
+        // This should rarely happen with paid tier
+        throw new Error('[NETWORK] Cannot connect to server. Please check your internet connection.');
       }
       
-      console.log('[AUTH] Server is awake, proceeding with login...');
-      set({ error: 'Server ready! Logging in...' });
+      console.log('[AUTH] Server is ready, proceeding with login...');
       
       console.log('[AUTH] Step 1: Calling login API...');
-      const response = await authAPI.login(email, password);
+      
+      // Retry login with exponential backoff in case of network issues
+      const response = await withRetry(
+        () => authAPI.login(email, password),
+        3, // 3 retries
+        (attempt, error) => {
+          console.log(`[AUTH] Login attempt ${attempt} failed, retrying...`, error?.message);
+          set({ error: `Connection issue, retrying (${attempt}/3)...` });
+        }
+      );
+      
       console.log('[AUTH] Step 2: Login API success');
       console.log('[AUTH] Response:', {
         hasToken: !!response.access_token,
@@ -105,9 +118,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
       console.log('[AUTH] Step 5: Token stored successfully');
       
-      // Get user data
+      // Get user data with retry
       console.log('[AUTH] Step 6: Fetching user data (/auth/me)...');
-      const meResponse = await authAPI.getMe();
+      const meResponse = await withRetry(
+        () => authAPI.getMe(),
+        3,
+        (attempt) => {
+          console.log(`[AUTH] GetMe attempt ${attempt} failed, retrying...`);
+        }
+      );
+      
       console.log('[AUTH] Step 7: User data received:', {
         id: meResponse.id,
         email: meResponse.email,
@@ -127,6 +147,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       console.error('[AUTH] Error type:', typeof error);
       console.error('[AUTH] Error constructor:', error?.constructor?.name);
       console.error('[AUTH] Error message:', error?.message);
+      
+      // Check if it's a server sleeping error - give better message
+      if (isServerSleepingError(error)) {
+        const userMessage = 'Server is waking up. This takes ~30 seconds on free hosting. Please tap Sign In again!';
+        console.log('[AUTH] Detected server sleep error, showing retry message');
+        
+        set({ 
+          error: userMessage,
+          isLoading: false,
+          isAuthenticated: false,
+          user: null,
+        });
+        throw new Error(userMessage);
+      }
       
       // Extract error code if present (format: [CODE] message)
       const errorMatch = error?.message?.match(/\[(.*?)\]\s*(.*)/);
@@ -152,7 +186,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           userMessage = 'Cannot connect to server. Check your internet connection.';
           break;
         case 'TIMEOUT':
-          userMessage = 'Request timed out. Please try again.';
+          userMessage = 'Request timed out. The server may be waking up. Please try again.';
           break;
       }
       
@@ -169,25 +203,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   register: async (email: string, password: string, displayName: string) => {
+    console.log('[AUTH] ========== REGISTER START ==========');
+    
     try {
       set({ isLoading: true, error: null });
       
-      // Wake up server (Render free tier cold start)
-      console.log('[AUTH] Step 0: Waking up server...');
+      // NOTE: With paid tier, server is always-on - no wake needed
+      console.log('[AUTH] Step 0: Checking server availability...');
       const serverReady = await waitForServer(
         (message) => {
           set({ error: message });
         },
-        15 // 75 seconds max
+        3 // Only 3 quick attempts
       );
       
       if (!serverReady) {
-        throw new Error('[TIMEOUT] Server is still waking up. Please try again in 10 seconds.');
+        throw new Error('[NETWORK] Cannot connect to server. Please check your internet connection.');
       }
       
-      set({ error: 'Server ready! Creating account...' });
+      set({ error: 'Creating account...' });
       
-      const response = await authAPI.register(email, password, displayName);
+      console.log('[AUTH] Step 1: Calling register API...');
+      
+      // Retry registration with exponential backoff
+      const response = await withRetry(
+        () => authAPI.register(email, password, displayName),
+        3,
+        (attempt, error) => {
+          console.log(`[AUTH] Register attempt ${attempt} failed, retrying...`, error?.message);
+          set({ error: `Connection issue, retrying (${attempt}/3)...` });
+        }
+      );
+      
       const { access_token, expires_in } = response;
       
       // Calculate expiration timestamp
@@ -197,8 +244,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await AsyncStorage.setItem(TOKEN_KEY, access_token);
       await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
       
-      // Get user data
-      const meResponse = await authAPI.getMe();
+      // Get user data with retry
+      console.log('[AUTH] Step 2: Fetching user data...');
+      const meResponse = await withRetry(
+        () => authAPI.getMe(),
+        3,
+        (attempt) => {
+          console.log(`[AUTH] GetMe attempt ${attempt} failed, retrying...`);
+        }
+      );
       
       set({
         user: meResponse,
@@ -206,8 +260,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
         error: null,
       });
+      
+      console.log('[AUTH] ========== REGISTER COMPLETE ==========');
+      
     } catch (error: any) {
-      console.error('Register error:', error?.message || error);
+      console.error('[AUTH] Register error:', error?.message || error);
+      
+      // Check if it's a server sleeping error
+      if (isServerSleepingError(error)) {
+        const userMessage = 'Server is waking up. This takes ~30 seconds on free hosting. Please tap Create Account again!';
+        set({ 
+          error: userMessage,
+          isLoading: false,
+        });
+        throw new Error(userMessage);
+      }
+      
       set({ 
         error: error?.message || 'Registration failed',
         isLoading: false,

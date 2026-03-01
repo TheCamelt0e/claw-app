@@ -3,7 +3,7 @@ services:
   - type: web
     name: claw-api
     runtime: python
-    plan: free
+    plan: starter  # Upgraded from free - eliminates cold starts
     buildCommand: pip install -r backend/requirements-prod.txt
     startCommand: cd backend && uvicorn app.main_production:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -63,7 +63,7 @@ services:
 databases:
   # PostgreSQL Database
   - name: claw-postgres
-    plan: free
+    plan: basic  # Upgraded to paid - already done
     ipAllowList: []  # Allow all IPs (Render's security handles this)
 
 # Redis (optional - uncomment to add Redis)

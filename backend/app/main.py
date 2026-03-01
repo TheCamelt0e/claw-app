@@ -2,11 +2,17 @@
 CLAW API - Production Ready - SECURITY HARDENED
 Supports SQLite (development) and PostgreSQL (production)
 Includes Redis for distributed rate limiting and caching
+
+PAID TIER CONFIGURATION:
+- PostgreSQL: Always-on (no cold starts)
+- Web Service: Starter plan (no cold starts)
 """
 import secrets
+from datetime import datetime
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import os
 
 from app.core.database import (
     engine, 
@@ -21,17 +27,26 @@ from app.core.config import settings
 from app.core.api_security import APISecurity, log_security_event
 from app.api.v1.router import api_router
 
+# NOTE: Self-ping is NOT needed with paid tier (Starter plan)
+# The server stays always-on with the $7/month plan
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events"""
+    """Application lifespan events - PAID TIER OPTIMIZED"""
+    
     # Startup
     try:
+        print("=" * 60)
+        print("[STARTUP] CLAW API - PAID TIER CONFIGURATION")
+        print("=" * 60)
+        
         # Initialize database
         init_db()
         db_status = "connected" if check_db_connection() else "disconnected"
         db_type = "SQLite" if IS_SQLITE else "PostgreSQL"
-        print(f"[OK] Database initialized ({db_type}) - Status: {db_status}")
+        db_tier = "PAID (Always-On)" if IS_POSTGRES else "SQLite"
+        print(f"[OK] Database: {db_type} ({db_tier}) - Status: {db_status}")
         
         # Initialize Redis (optional)
         try:
@@ -41,6 +56,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[WARN] Redis initialization failed: {e}")
             print("[INFO] Falling back to in-memory storage for rate limiting")
+        
+        # PAID TIER: No self-ping needed - server is always on
+        if settings.is_production() and IS_POSTGRES:
+            print("[OK] PAID TIER ACTIVE - No cold starts, always-on server")
+            print("[OK] Users will experience instant login/signup")
+        
+        print("=" * 60)
+        print("[STARTUP] Complete - Server ready")
+        print("=" * 60)
             
     except Exception as e:
         print(f"[ERROR] Startup failed: {e}")
@@ -134,12 +158,29 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint - verifies database and Redis connectivity"""
-    db_healthy = check_db_connection()
+    """
+    Health check endpoint - verifies database and Redis connectivity
+    OPTIMIZED: Fast response for Render cold start wake-up pings
+    """
+    # Quick database check with timeout
+    db_healthy = False
     db_type = "sqlite" if IS_SQLITE else "postgresql"
     
+    try:
+        # Use a shorter timeout for health checks to respond quickly
+        import asyncio
+        db_healthy = await asyncio.wait_for(
+            asyncio.to_thread(check_db_connection),
+            timeout=5.0  # 5 second timeout for health checks
+        )
+    except asyncio.TimeoutError:
+        db_healthy = False
+    except Exception as e:
+        print(f"[Health] Database check failed: {e}")
+        db_healthy = False
+    
     return {
-        "status": "healthy" if db_healthy else "unhealthy",
+        "status": "healthy" if db_healthy else "degraded",
         "service": "claw-api",
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
@@ -150,7 +191,9 @@ async def health_check():
         "redis": {
             "enabled": redis_client.is_enabled(),
             "connected": redis_client.is_enabled()
-        }
+        },
+        # Add timestamp for debugging
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 

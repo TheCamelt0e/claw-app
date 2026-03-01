@@ -3,6 +3,7 @@
  * Using native fetch (React Native compatible)
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // ==========================================
 // PRODUCTION BACKEND URL
@@ -10,11 +11,42 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PRODUCTION_API_URL = 'https://claw-api-b5ts.onrender.com/api/v1';
 const DEVELOPMENT_API_URL = 'http://localhost:8000/api/v1';
 
-// Always use production URL for APK builds
-// For local dev with emulator, temporarily change to DEVELOPMENT_API_URL
-export const API_BASE_URL = PRODUCTION_API_URL;
+// Determine which URL to use
+// Check if running on emulator/simulator
+const isDevelopment = __DEV__;
+const isAndroid = Platform.OS === 'android';
+const isIOS = Platform.OS === 'ios';
+
+// For Android emulator, use 10.0.2.2 to access host localhost
+// For iOS simulator, use localhost
+// For production builds, always use production URL
+let API_BASE_URL: string;
+
+if (!isDevelopment) {
+  // Production build - always use production
+  API_BASE_URL = PRODUCTION_API_URL;
+} else if (isAndroid) {
+  // Android emulator
+  API_BASE_URL = 'http://10.0.2.2:8000/api/v1';
+} else if (isIOS) {
+  // iOS simulator
+  API_BASE_URL = 'http://localhost:8000/api/v1';
+} else {
+  // Fallback
+  API_BASE_URL = PRODUCTION_API_URL;
+}
+
+// Allow override via environment-like variable (for testing)
+// @ts-ignore
+if (global.CLAW_API_URL) {
+  // @ts-ignore
+  API_BASE_URL = global.CLAW_API_URL;
+}
+
+export { API_BASE_URL };
 
 console.log('[CLAW] API URL:', API_BASE_URL);
+console.log('[CLAW] Platform:', Platform.OS, '| Development:', isDevelopment);
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -210,13 +242,42 @@ export async function apiRequest<T>(
   } catch (error: any) {
     clearTimeout(timeoutId);
     console.error('[API] Request failed:', error);
+    
+    // Handle abort/timeout
     if (error.name === 'AbortError') {
-      throw new Error('Request timed out. The server may be waking up (takes ~30s). Please try again.');
+      throw new Error('[TIMEOUT] Server took too long to respond. The server may be waking up (takes ~30s). Please try again.');
     }
-    // Better error for network failures
-    if (!error.message || error.message === '') {
-      throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Check connection/CORS.`);
+    
+    // React Native specific network error detection
+    const errorMessage = error?.message || '';
+    const isNetworkError = 
+      errorMessage.includes('Network request failed') ||
+      errorMessage.includes('Network Error') ||
+      errorMessage.includes('ECONNREFUSED') ||
+      errorMessage.includes('ETIMEDOUT') ||
+      errorMessage.includes('ENOTFOUND') ||
+      errorMessage.includes('Socket') ||
+      !errorMessage; // Empty message usually means network failure in RN
+    
+    if (isNetworkError) {
+      // Check if it's a development build trying to reach localhost
+      if (API_BASE_URL.includes('localhost') || API_BASE_URL.includes('10.0.2.2')) {
+        throw new Error('[NETWORK] Cannot connect to local server. Make sure the backend is running on your computer.\n\nFor Android: Use 10.0.2.2:8000\nFor iOS: Use localhost:8000');
+      }
+      
+      // Check if it's an SSL/TLS error (common in React Native)
+      if (errorMessage.includes('SSL') || errorMessage.includes('certificate') || errorMessage.includes('TLS')) {
+        throw new Error('[NETWORK] SSL/TLS connection error. This can happen with self-signed certificates or network restrictions.');
+      }
+      
+      throw new Error(`[NETWORK] Cannot connect to server at ${API_BASE_URL}. Check your internet connection or try again.`);
     }
+    
+    // Better error for empty messages
+    if (!errorMessage) {
+      throw new Error(`[NETWORK] Network error: Cannot reach ${API_BASE_URL}. Check connection/CORS.`);
+    }
+    
     throw error;
   }
 }
