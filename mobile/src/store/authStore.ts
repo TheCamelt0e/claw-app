@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { authAPI } from '../api/client';
+import { waitForServer } from '../service/serverWake';
 
 interface User {
   id: string;
@@ -66,6 +67,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     
     try {
       set({ isLoading: true, error: null });
+      
+      // Wake up server (Render free tier cold start)
+      console.log('[AUTH] Step 0: Waking up server...');
+      const serverReady = await waitForServer(
+        (attempt, max) => {
+          set({ error: `Server waking up... (${attempt}/${max})` });
+        },
+        12 // 60 seconds max
+      );
+      
+      if (!serverReady) {
+        throw new Error('[TIMEOUT] Server is taking too long to start. Please try again in a moment.');
+      }
       
       console.log('[AUTH] Step 1: Calling login API...');
       const response = await authAPI.login(email, password);
@@ -154,6 +168,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (email: string, password: string, displayName: string) => {
     try {
       set({ isLoading: true, error: null });
+      
+      // Wake up server (Render free tier cold start)
+      console.log('[AUTH] Step 0: Waking up server...');
+      const serverReady = await waitForServer(
+        (attempt, max) => {
+          set({ error: `Server waking up... (${attempt}/${max})` });
+        },
+        12 // 60 seconds max
+      );
+      
+      if (!serverReady) {
+        throw new Error('[TIMEOUT] Server is taking too long to start. Please try again in a moment.');
+      }
       
       const response = await authAPI.register(email, password, displayName);
       const { access_token, expires_in } = response;

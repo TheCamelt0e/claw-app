@@ -28,6 +28,7 @@ export default function LoginScreen() {
   const [displayName, setDisplayName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
   const { login, register } = useAuthStore();
   const navigation = useNavigation();
@@ -66,6 +67,7 @@ export default function LoginScreen() {
       console.log('[LOGIN] Step 2: Validation passed');
       setIsLoading(true);
       setError('');
+      setInfo('Connecting to server...');
       
       console.log('[LOGIN] Step 3: About to call login function');
       if (isLogin) {
@@ -76,6 +78,7 @@ export default function LoginScreen() {
         console.log('[LOGIN] Calling register API...');
         await register(email.trim(), password, displayName.trim());
       }
+      setInfo('');
     } catch (err: any) {
       // Debug: Log full error details
       console.error('[LOGIN] CATCH BLOCK - Error:', err);
@@ -84,11 +87,19 @@ export default function LoginScreen() {
       console.error('[LOGIN] Error message:', err?.message);
       console.error('[LOGIN] Error stack:', err?.stack);
       
-      // Show error in Alert
+      // Show error in Alert (but not for server wake messages)
       const errorMsg = err?.message || err?.detail || String(err) || 'Unknown error';
-      Alert.alert('Login Error', errorMsg);
       
-      setError(errorMsg);
+      // Check if it's a server wake timeout - show nicer message
+      if (errorMsg.includes('taking too long') || errorMsg.includes('timed out')) {
+        setInfo('');
+        setError('Server is waking up. This takes ~30s on first load. Please try again.');
+        Alert.alert('Server Waking Up', 'The server is starting (takes ~30s). Please try again in a moment.');
+      } else {
+        setInfo('');
+        Alert.alert('Login Error', errorMsg);
+        setError(errorMsg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -185,6 +196,13 @@ export default function LoginScreen() {
                 autoComplete={isLogin ? 'password' : 'new-password'}
               />
             </View>
+
+            {info ? (
+              <View style={styles.infoContainer}>
+                <ActivityIndicator size="small" color="#FF6B35" style={styles.infoIcon} />
+                <Text style={styles.infoText}>{info}</Text>
+              </View>
+            ) : null}
 
             {error ? (
               <View style={styles.errorContainer}>
@@ -374,6 +392,22 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#e94560',
     marginLeft: 8,
+    flex: 1,
+    fontSize: 14,
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 107, 53, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  infoIcon: {
+    marginRight: 8,
+  },
+  infoText: {
+    color: '#FF6B35',
     flex: 1,
     fontSize: 14,
   },

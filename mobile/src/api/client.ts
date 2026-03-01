@@ -12,7 +12,7 @@ const DEVELOPMENT_API_URL = 'http://localhost:8000/api/v1';
 
 // Always use production URL for APK builds
 // For local dev with emulator, temporarily change to DEVELOPMENT_API_URL
-const API_BASE_URL = PRODUCTION_API_URL;
+export const API_BASE_URL = PRODUCTION_API_URL;
 
 console.log('[CLAW] API URL:', API_BASE_URL);
 
@@ -141,7 +141,7 @@ export async function apiRequest<T>(
   endpoint: string,
   body?: Record<string, unknown> | null,
   params?: Record<string, unknown>,
-  timeoutMs: number = 30000
+  timeoutMs: number = 60000
 ): Promise<T> {
   // Build URL with query params
   let url = `${API_BASE_URL}${endpoint}`;
@@ -211,7 +211,7 @@ export async function apiRequest<T>(
     clearTimeout(timeoutId);
     console.error('[API] Request failed:', error);
     if (error.name === 'AbortError') {
-      throw new Error('Request timed out. Please check your connection.');
+      throw new Error('Request timed out. The server may be waking up (takes ~30s). Please try again.');
     }
     // Better error for network failures
     if (!error.message || error.message === '') {
