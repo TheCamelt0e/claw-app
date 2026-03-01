@@ -11,6 +11,7 @@ from enum import Enum
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.database import get_db
 from app.core.security import (
@@ -86,6 +87,25 @@ class ResetPasswordRequest(BaseModel):
 async def test_ping():
     """Test endpoint without database"""
     return {"status": "pong", "message": "POST works without DB"}
+
+
+# TEMPORARY ADMIN - Clear all users
+@router.post("/admin/clear-all-users")
+async def admin_clear_users(db: Session = Depends(get_db)):
+    """TEMPORARY: Clear all users and related data"""
+    try:
+        # Delete in order to avoid foreign key constraints
+        db.execute(text("DELETE FROM strike_patterns"))
+        db.execute(text("DELETE FROM group_claws"))
+        db.execute(text("DELETE FROM group_members"))
+        db.execute(text("DELETE FROM groups"))
+        db.execute(text("DELETE FROM claws"))
+        db.execute(text("DELETE FROM users"))
+        db.commit()
+        return {"message": "All users and data cleared successfully"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
 
 
 @router.post("/register", response_model=TokenResponse)
