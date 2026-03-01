@@ -82,10 +82,9 @@ class GeminiService:
         
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # Initialize model with system instruction for consistent AI persona
+            # Initialize model (system instruction added to prompts for compatibility)
             self._client = genai.GenerativeModel(
-                model_name=self.model_name,
-                system_instruction=CLAW_SYSTEM_INSTRUCTION
+                model_name=self.model_name
             )
     
     def is_available(self) -> bool:
@@ -145,7 +144,9 @@ class GeminiService:
             safe_claws = [self._sanitize_input(c['content']) for c in existing_claws[:5]]
             existing_context = f"\nUser's existing intentions: {json.dumps(safe_claws)}"
         
-        return f"""You are CLAW's AI assistant. Analyze this captured intention and extract rich structured information.
+        return f"""{CLAW_SYSTEM_INSTRUCTION}
+
+You are CLAW's AI assistant. Analyze this captured intention and extract rich structured information.
 
 CONTENT: "{safe_content}"{existing_context}
 
