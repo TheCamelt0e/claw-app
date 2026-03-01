@@ -109,8 +109,9 @@ async def security_middleware(request: Request, call_next):
         if settings.is_production():
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         
-        # Remove server fingerprinting
-        response.headers.pop("server", None)
+        # Remove server fingerprinting (del if exists)
+        if "server" in response.headers:
+            del response.headers["server"]
         
         return response
         
@@ -118,9 +119,13 @@ async def security_middleware(request: Request, call_next):
         # Log error but don't crash the request
         print(f"[ERROR] Security middleware failed: {e}")
         # Still try to return the response
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        except Exception as e2:
+            print(f"[FATAL] Security middleware double failure: {e2}")
+            raise
 
 
 # Include API routes
