@@ -56,9 +56,9 @@ export default function LoginScreen() {
         setError('Please enter a valid email address');
         return;
       }
-      if (password.length < 6) {
+      if (password.length < 8) {
         console.log('[LOGIN] Validation failed: password too short');
-        setError('Password must be at least 6 characters');
+        setError('Password must be at least 8 characters');
         return;
       }
 
@@ -176,7 +176,7 @@ export default function LoginScreen() {
               <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Password (min 6 characters)"
+                placeholder="Password (min 8 characters)"
                 placeholderTextColor="#666"
                 value={password}
                 onChangeText={setPassword}
@@ -259,6 +259,9 @@ export default function LoginScreen() {
             <View style={styles.demoContainer}>
               <Text style={styles.demoText}>
                 Test account: test@example.com / password123
+              </Text>
+              <Text style={styles.demoText}>
+                Note: Password must be 8+ characters
               </Text>
             </View>
           )}

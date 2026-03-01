@@ -20,12 +20,8 @@ from app.core.security import (
     get_current_user,
     get_current_user_optional
 )
-from app.core.rate_limit import (
-    brute_force_protection, 
-    get_client_ip, 
-    rate_limiter,
-    rate_limit
-)
+from app.core.rate_limit import get_client_ip
+from app.core.rate_limit_safe import safe_brute_force_protection, safe_rate_limit
 from app.core.email import email_service
 from app.core.config import settings
 from app.models.user_sqlite import User
@@ -81,15 +77,8 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=100)
 
 
-# TEST ENDPOINT - no database
-@router.post("/test-ping")
-async def test_ping():
-    """Test endpoint without database"""
-    return {"status": "pong", "message": "POST works without DB"}
-
-
 @router.post("/register", response_model=TokenResponse)
-# @rate_limit(requests_per_minute=5)  # Temporarily disabled for testing
+@safe_rate_limit(requests_per_minute=5)
 async def register(
     http_request: Request,
     request: UserRegister = Body(...), 
@@ -161,7 +150,7 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
-# @brute_force_protection(max_attempts=5, window_seconds=300)  # Temporarily disabled for testing
+@safe_brute_force_protection(max_attempts=5, window_seconds=300)
 async def login(
     http_request: Request,
     request: UserLogin = Body(...), 
@@ -191,6 +180,13 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Check email verification (if enabled)
+    if settings.REQUIRE_EMAIL_VERIFICATION and not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please check your email for verification link."
         )
     
     # Update last active
@@ -239,7 +235,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/refresh")
-@rate_limit(requests_per_minute=10)
+@safe_rate_limit(requests_per_minute=10)
 async def refresh_token(
     http_request: Request,
     current_user: User = Depends(get_current_user)
@@ -287,7 +283,7 @@ async def logout_all_devices(
 
 
 @router.post("/change-password")
-@brute_force_protection(max_attempts=3, window_seconds=300)
+@safe_brute_force_protection(max_attempts=3, window_seconds=300)
 async def change_password(
     current_password: str = Body(..., min_length=8),
     new_password: str = Body(..., min_length=8, max_length=100),
@@ -302,16 +298,12 @@ async def change_password(
     """
     client_ip = get_client_ip(http_request) if http_request else "unknown"
     
-    # Verify current password
+    # Verify current password (rate limiting handled by decorator)
     if not verify_password(current_password, current_user.hashed_password):
-        rate_limiter.record_failed_attempt(client_ip)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect"
         )
-    
-    # Clear failed attempts on success
-    rate_limiter.clear_failed_attempts(client_ip)
     
     # Hash and set new password
     current_user.hashed_password = get_password_hash(new_password)
@@ -382,7 +374,7 @@ async def delete_account(
 # Email Verification Endpoints
 
 @router.post("/verify-email")
-@rate_limit(requests_per_minute=10)
+@safe_rate_limit(requests_per_minute=10)
 async def verify_email(
     request: VerifyEmailRequest = Body(...),
     db: Session = Depends(get_db)
@@ -428,7 +420,7 @@ async def verify_email(
 
 
 @router.post("/resend-verification")
-@rate_limit(requests_per_minute=3)
+@safe_rate_limit(requests_per_minute=3)
 async def resend_verification(
     request: ResendVerificationRequest = Body(...),
     db: Session = Depends(get_db)
@@ -484,7 +476,7 @@ async def resend_verification(
 # Password Reset Endpoints
 
 @router.post("/forgot-password")
-@rate_limit(requests_per_minute=3)
+@safe_rate_limit(requests_per_minute=3)
 async def forgot_password(
     request: ForgotPasswordRequest = Body(...),
     db: Session = Depends(get_db)
@@ -530,7 +522,7 @@ async def forgot_password(
 
 
 @router.post("/reset-password")
-@rate_limit(requests_per_minute=5)
+@safe_rate_limit(requests_per_minute=5)
 async def reset_password(
     request: ResetPasswordRequest = Body(...),
     db: Session = Depends(get_db)

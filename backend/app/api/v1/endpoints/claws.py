@@ -13,7 +13,7 @@ import logging
 from app.core.database import get_db
 from app.core.config import VIP_EXPIRY_DAYS, HIGH_PRIORITY_EXPIRY_DAYS, DEFAULT_EXPIRY_DAYS, FREE_TIER_CLAW_LIMIT
 from app.core.security import get_current_user, get_current_user_optional
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit_safe import safe_rate_limit
 from app.models.claw_sqlite import Claw
 from app.models.user_sqlite import User
 from app.services.categorization import categorize_content
@@ -67,7 +67,7 @@ class StrikeRequest(BaseModel):
 
 
 @router.post("/capture")
-@rate_limit(requests_per_minute=30)  # Prevent spam
+@safe_rate_limit(requests_per_minute=30)  # Prevent spam
 async def capture_claw(
     request: CaptureRequest,
     current_user: User = Depends(get_current_user),
@@ -79,14 +79,24 @@ async def capture_claw(
     """
     content = request.content.strip()
     
-    # Check limit for free tier
-    active_count = db.query(Claw).filter(
+    # Check limit for free tier (with user lock to prevent race conditions)
+    # Lock the user row to prevent concurrent limit bypass
+    from sqlalchemy import func
+    from sqlalchemy.orm import with_for_update
+    
+    # Re-fetch user with lock
+    user_locked = db.query(User).filter(
+        User.id == current_user.id
+    ).with_for_update().first()
+    
+    active_count = db.query(func.count(Claw.id)).filter(
         Claw.user_id == current_user.id,
         Claw.status == ClawStatus.ACTIVE
-    ).count()
+    ).scalar()
     
-    claw_limit = current_user.get_claw_limit()
+    claw_limit = user_locked.get_claw_limit()
     if claw_limit > 0 and active_count >= claw_limit:
+        db.rollback()  # Release lock
         raise HTTPException(
             status_code=403,
             detail=f"Free tier limited to {FREE_TIER_CLAW_LIMIT} active claws. Upgrade to Pro!"
@@ -268,7 +278,7 @@ async def get_surface_claws(
 
 
 @router.post("/{claw_id}/strike")
-@rate_limit(requests_per_minute=60)  # Prevent strike spam
+@safe_rate_limit(requests_per_minute=60)  # Prevent strike spam
 async def strike_claw(
     claw_id: str,
     request: Optional[StrikeRequest] = None,
@@ -350,7 +360,7 @@ async def strike_claw(
 
 
 @router.post("/{claw_id}/release")
-@rate_limit(requests_per_minute=30)
+@safe_rate_limit(requests_per_minute=30)
 async def release_claw(
     claw_id: str,
     current_user: User = Depends(get_current_user),
@@ -389,7 +399,7 @@ async def release_claw(
 
 
 @router.post("/{claw_id}/extend")
-@rate_limit(requests_per_minute=30)
+@safe_rate_limit(requests_per_minute=30)
 async def extend_claw(
     claw_id: str,
     request: ExtendRequest,
@@ -431,7 +441,7 @@ async def extend_claw(
 
 
 @router.post("/demo-data")
-@rate_limit(requests_per_minute=1)  # Very strict rate limit
+@safe_rate_limit(requests_per_minute=1)  # Very strict rate limit
 async def create_demo_data(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

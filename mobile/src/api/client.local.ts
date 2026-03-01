@@ -28,7 +28,8 @@ async function apiRequest<T>(
   method: string,
   endpoint: string,
   body?: any,
-  params?: Record<string, any>
+  params?: Record<string, any>,
+  timeoutMs: number = 30000
 ): Promise<T> {
   let url = `${API_BASE_URL}${endpoint}`;
   if (params) {
@@ -46,39 +47,74 @@ async function apiRequest<T>(
 
   const headers = await getAuthHeaders();
   
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
   const options: RequestInit = {
     method,
     headers,
+    signal: controller.signal,
   };
 
   if (body && method !== 'GET') {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, options);
+  console.log(`[API] ${method} ${url}`, body ? { body: { ...body, password: '***' } } : '');
   
-  if (response.status === 401) {
-    await AsyncStorage.removeItem('access_token');
-  }
+  try {
+    const response = await fetch(url, options);
+  
+    clearTimeout(timeoutId);
+    console.log(`[API] Response Status: ${response.status}`);
+    
+    if (response.status === 401) {
+      await AsyncStorage.removeItem('access_token');
+      const errorData = await response.json().catch(() => ({ detail: 'Unauthorized' }));
+      throw new Error(`[HTTP_401] ${errorData.detail || 'Session expired. Please log in again.'}`);
+    }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`API Error ${response.status}: ${errorText}`);
-  }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[API] Error Response: ${response.status} - ${errorText}`);
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        const errorCode = errorJson.code || `HTTP_${response.status}`;
+        throw new Error(`[${errorCode}] ${errorJson.detail || errorJson.message || `API Error ${response.status}`}`);
+      } catch {
+        throw new Error(`[HTTP_${response.status}] ${errorText || 'Unknown error'}`);
+      }
+    }
 
   if (response.status === 204) {
     return null as T;
   }
 
-  return response.json();
+    return response.json();
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    console.error('[API] Request Failed:', {
+      message: error?.message,
+      name: error?.name,
+    });
+    
+    if (error.name === 'AbortError') {
+      throw new Error('[TIMEOUT] Request timed out. Check your connection.');
+    }
+    if (error.message?.includes('Network request failed')) {
+      throw new Error(`[NETWORK] Cannot connect to ${API_BASE_URL}. Check IP/connection.`);
+    }
+    throw error;
+  }
 }
 
 export const authAPI = {
   login: (email: string, password: string) =>
-    apiRequest<any>('POST', '/auth/login', null, { email, password }),
+    apiRequest<any>('POST', '/auth/login', { email, password }),
   
   register: (email: string, password: string, displayName: string) =>
-    apiRequest<any>('POST', '/auth/register', null, { email, password, display_name: displayName }),
+    apiRequest<any>('POST', '/auth/register', { email, password, display_name: displayName }),
   
   getMe: () =>
     apiRequest<any>('GET', '/auth/me'),

@@ -14,7 +14,7 @@ import logging
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit_safe import safe_rate_limit
 from app.models.group import Group, GroupClaw, group_members
 from app.models.claw_sqlite import Claw
 from app.models.user_sqlite import User
@@ -55,7 +55,7 @@ class CaptureToGroupRequest(BaseModel):
 
 
 @router.post("/create")
-@rate_limit(requests_per_minute=10)
+@safe_rate_limit(requests_per_minute=10)
 async def create_group(
     request: CreateGroupRequest,
     current_user: User = Depends(get_current_user),
@@ -154,7 +154,7 @@ async def get_group(
 
 
 @router.post("/{group_id}/capture")
-@rate_limit(requests_per_minute=20)
+@safe_rate_limit(requests_per_minute=20)
 async def capture_to_group(
     group_id: str,
     request: CaptureToGroupRequest,
@@ -218,7 +218,7 @@ async def capture_to_group(
 
 
 @router.post("/{group_id}/items/{group_claw_id}/claim")
-@rate_limit(requests_per_minute=30)
+@safe_rate_limit(requests_per_minute=30)
 async def claim_group_item(
     group_id: str,
     group_claw_id: str,
@@ -275,7 +275,7 @@ async def claim_group_item(
 
 
 @router.post("/{group_id}/items/{group_claw_id}/strike")
-@rate_limit(requests_per_minute=30)
+@safe_rate_limit(requests_per_minute=30)
 async def strike_group_item(
     group_id: str,
     group_claw_id: str,
@@ -328,7 +328,7 @@ async def strike_group_item(
 
 
 @router.post("/{group_id}/invite")
-@rate_limit(requests_per_minute=5)
+@safe_rate_limit(requests_per_minute=5)
 async def invite_member(
     group_id: str,
     request: AddMemberRequest,

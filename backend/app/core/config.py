@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     
     # Security Settings
-    REQUIRE_EMAIL_VERIFICATION: bool = False  # Set to True in production
+    REQUIRE_EMAIL_VERIFICATION: bool = True  # Enabled by default for security
     
     # Redis Configuration (for distributed rate limiting and caching)
     REDIS_URL: str = ""  # e.g., redis://localhost:6379/0 or rediss:// for TLS
