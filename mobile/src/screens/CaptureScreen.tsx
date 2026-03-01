@@ -222,9 +222,9 @@ export default function CaptureScreen() {
 
       subscriptionsRef.current = [resultSub, errorSub, endSub];
 
-      // Start recognition
+      // Start recognition with Icelandic support
       await SpeechModule.ExpoSpeechRecognitionModule.start({
-        lang: 'en-US',
+        lang: 'is-IS',  // Icelandic language code
         interimResults: true,
         maxAlternatives: 1,
         addsPunctuation: true,
@@ -481,7 +481,7 @@ export default function CaptureScreen() {
             <TextInput
               key={inputKey} // Force re-render to reset height after capture
               style={styles.input}
-              placeholder="Type or speak your intention..."
+              placeholder="Type or speak (Íslenska/English)..."
               placeholderTextColor="#666"
               value={content}
               onChangeText={setContent}
