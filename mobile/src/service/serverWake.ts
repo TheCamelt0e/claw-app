@@ -7,6 +7,9 @@
 
 import { API_BASE_URL } from '../api/client';
 
+// Health endpoint is at root, not /api/v1
+const BASE_URL = API_BASE_URL.replace('/api/v1', '');
+
 const WAKE_TIMEOUT = 5000; // 5s for wake ping (fast)
 const MAX_WAKE_RETRIES = 3;
 
@@ -22,7 +25,7 @@ export async function wakeServer(): Promise<boolean> {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), WAKE_TIMEOUT);
       
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${BASE_URL}/health`, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -64,7 +67,7 @@ export async function waitForServer(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${BASE_URL}/health`, {
         method: 'GET',
         signal: controller.signal,
       });
