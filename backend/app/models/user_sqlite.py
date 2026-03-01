@@ -47,6 +47,13 @@ class User(Base):
     last_strike_date = Column(DateTime, nullable=True)
     streak_milestones = Column(String, default="")  # JSON array: ["7_day", "30_day", "100_day"]
     
+    # Streak System 2.0
+    streak_freezes_available = Column(Integer, default=1)  # Freezes per month
+    streak_freezes_used_this_month = Column(Integer, default=0)
+    streak_freeze_reset_date = Column(DateTime, nullable=True)
+    active_streak_bet = Column(String, nullable=True)  # JSON: {"target_strikes": 10, "deadline": "...", "reward": "..."}
+    streak_recovery_available = Column(Boolean, default=True)  # One recovery ever
+    
     # Token versioning for secure logout/revocation
     token_version = Column(Integer, default=0, nullable=False)
     
@@ -140,5 +147,120 @@ class User(Base):
             "longest_streak": self.longest_streak_days,
             "last_strike_date": self.last_strike_date.isoformat() if self.last_strike_date else None,
             "streak_expires_at": expires_at,
-            "milestones_achieved": self.streak_milestones.split(',') if self.streak_milestones else []
+            "milestones_achieved": self.streak_milestones.split(',') if self.streak_milestones else [],
+            "streak_freezes_available": self._get_available_freezes(),
+            "streak_recovery_available": self.streak_recovery_available and self.current_streak_days > 0,
+            "active_bet": self._parse_active_bet()
         }
+    
+    def _get_available_freezes(self) -> int:
+        """Get available streak freezes (resets monthly)"""
+        now = datetime.utcnow()
+        
+        if self.streak_freeze_reset_date:
+            # Check if we need to reset (new month)
+            reset_date = self.streak_freeze_reset_date
+            if now.month != reset_date.month or now.year != reset_date.year:
+                self.streak_freezes_used_this_month = 0
+                self.streak_freeze_reset_date = now
+        else:
+            self.streak_freeze_reset_date = now
+        
+        return max(0, self.streak_freezes_available - self.streak_freezes_used_this_month)
+    
+    def use_streak_freeze(self) -> bool:
+        """Use a streak freeze to maintain current streak"""
+        available = self._get_available_freezes()
+        if available > 0:
+            self.streak_freezes_used_this_month += 1
+            # Update last_strike_date to today to maintain streak
+            self.last_strike_date = datetime.utcnow()
+            return True
+        return False
+    
+    def use_streak_recovery(self) -> bool:
+        """Use the one-time streak recovery (restore broken streak)"""
+        if self.streak_recovery_available and self.longest_streak_days > 0:
+            self.current_streak_days = min(self.longest_streak_days, self.current_streak_days + 7)
+            self.streak_recovery_available = False
+            self.last_strike_date = datetime.utcnow()
+            return True
+        return False
+    
+    def place_streak_bet(self, target_strikes: int, days: int) -> dict:
+        """Place a bet on achieving X strikes in Y days"""
+        import json
+        now = datetime.utcnow()
+        deadline = now + timedelta(days=days)
+        
+        bet = {
+            "target_strikes": target_strikes,
+            "current_strikes": 0,
+            "deadline": deadline.isoformat(),
+            "placed_at": now.isoformat(),
+            "reward": self._calculate_bet_reward(target_strikes, days),
+            "status": "active"
+        }
+        
+        self.active_streak_bet = json.dumps(bet)
+        return bet
+    
+    def _calculate_bet_reward(self, target: int, days: int) -> str:
+        """Calculate reward for completing a bet"""
+        difficulty = target / max(days, 1)
+        if difficulty >= 2:
+            return "legendary_badge"
+        elif difficulty >= 1.5:
+            return "epic_badge"
+        elif difficulty >= 1:
+            return "rare_badge"
+        return "common_badge"
+    
+    def update_streak_bet(self) -> dict:
+        """Update bet progress when user strikes. Call this after update_streak()."""
+        import json
+        
+        if not self.active_streak_bet:
+            return None
+        
+        bet = json.loads(self.active_streak_bet)
+        now = datetime.utcnow()
+        deadline = datetime.fromisoformat(bet["deadline"])
+        
+        # Check if bet expired
+        if now > deadline:
+            bet["status"] = "failed"
+            self.active_streak_bet = None
+            return {"status": "failed", "reason": "deadline_passed"}
+        
+        # Increment progress
+        bet["current_strikes"] += 1
+        
+        # Check if completed
+        if bet["current_strikes"] >= bet["target_strikes"]:
+            bet["status"] = "completed"
+            self.active_streak_bet = None
+            return {
+                "status": "completed",
+                "reward": bet["reward"],
+                "target": bet["target_strikes"]
+            }
+        
+        # Update active bet
+        self.active_streak_bet = json.dumps(bet)
+        return {
+            "status": "active",
+            "progress": bet["current_strikes"],
+            "target": bet["target_strikes"],
+            "deadline": bet["deadline"]
+        }
+    
+    def _parse_active_bet(self) -> dict:
+        """Parse active bet from JSON string"""
+        import json
+        if not self.active_streak_bet:
+            return None
+        try:
+            return json.loads(self.active_streak_bet)
+        except:
+            return None

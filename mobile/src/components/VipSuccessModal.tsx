@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { colors } from '../theme';
 
 interface VipSuccessModalProps {
   visible: boolean;
@@ -70,7 +71,7 @@ export default function VipSuccessModal({
           ]}
         >
           <LinearGradient
-            colors={['#1a1a00', '#0f0f00']}
+            colors={[colors.gold.card, '#0f0f00']}
             style={styles.gradient}
           >
             {/* Flame Icon */}

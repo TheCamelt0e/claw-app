@@ -318,6 +318,17 @@ Exported from CLAW - Capture now. Strike later.
         {renderSubscriptionCard()}
 
         {/* Actions */}
+        <TouchableOpacity 
+          style={styles.actionButton} 
+          onPress={() => navigation.navigate('StreakManagement')}
+        >
+          <Ionicons name="flame-outline" size={20} color="#FF6B35" />
+          <Text style={styles.actionButtonText}>Manage Streak</Text>
+          <View style={styles.streakBadge}>
+            <Text style={styles.streakBadgeText}>{currentStreak}d</Text>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.actionButton} onPress={handleExportData}>
           <Ionicons name="download-outline" size={20} color="#FF6B35" />
           <Text style={styles.actionButtonText}>Export My Data</Text>
@@ -622,5 +633,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#444',
     marginTop: 4,
+  },
+  streakBadge: {
+    backgroundColor: '#FF6B35',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 'auto',
+  },
+  streakBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });

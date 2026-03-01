@@ -108,7 +108,7 @@ export default function ArchaeologistModal({
           </View>
           <Text style={styles.title}>🦀 The Archaeologist</Text>
           <Text style={styles.subtitle}>
-            You captured these {formatAge(items[0].created_at)}. Still curious?
+            You captured {items.length} item{items.length !== 1 ? 's' : ''}{items[0]?.created_at ? `, oldest is ${formatAge(items[0].created_at)}` : ''}. Still curious?
           </Text>
         </View>
 
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   container: {
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.background.DEFAULT,
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     paddingTop: 24,
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFD700',
+    color: colors.gold.DEFAULT,
     marginBottom: 8,
   },
   subtitle: {

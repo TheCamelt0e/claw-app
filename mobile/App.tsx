@@ -42,6 +42,7 @@ import ExpirySettingsScreen from './src/screens/ExpirySettingsScreen';
 import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import ShareScreen from './src/screens/ShareScreen';
 import HelpScreen from './src/screens/HelpScreen';
+import StreakManagementScreen from './src/screens/StreakManagementScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -159,6 +160,7 @@ function MainStack() {
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
       <Stack.Screen name="Share" component={ShareScreen} />
       <Stack.Screen name="Help" component={HelpScreen} />
+      <Stack.Screen name="StreakManagement" component={StreakManagementScreen} />
     </Stack.Navigator>
   );
 }

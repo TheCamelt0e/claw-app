@@ -4,6 +4,7 @@
 import React, { Component, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../theme';
 
 interface Props {
   children: ReactNode;
@@ -42,7 +43,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
       return (
         <View style={styles.container}>
-          <Ionicons name="alert-circle" size={64} color="#e94560" />
+          <Ionicons name="alert-circle" size={64} color={colors.danger.DEFAULT} />
           <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>
             {this.state.error?.message || 'An unexpected error occurred'}
@@ -61,7 +62,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.background.DEFAULT,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -69,24 +70,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.text.primary,
     marginTop: 16,
   },
   message: {
     fontSize: 14,
-    color: '#888',
+    color: colors.text.muted,
     marginTop: 8,
     textAlign: 'center',
   },
   button: {
     marginTop: 24,
-    backgroundColor: '#FF6B35',
+    backgroundColor: colors.primary.DEFAULT,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: '600',
   },

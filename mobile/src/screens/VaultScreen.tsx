@@ -21,8 +21,11 @@ import { isVipClaw, getVipBadgeText, cleanVipTitle } from '../utils/vip';
 import ActionSheet from '../components/ActionSheet';
 import DarkAlert from '../components/DarkAlert';
 import ArchaeologistModal from '../components/ArchaeologistModal';
+import WeeklyReviewModal from '../components/WeeklyReviewModal';
 import { EmptyState } from '../components/ui';
 import { Claw } from '../store/clawStore';
+import { achievementEngine } from '../achievements/AchievementEngine';
+import { weeklyReview, WeeklyReview } from '../analytics/WeeklyReview';
 import { 
   shouldShowArchaeologist, 
   getSomedayItemsForArchaeologist,
@@ -170,10 +173,24 @@ export default function VaultScreen() {
   const [showArchaeologist, setShowArchaeologist] = useState(false);
   const [archaeologistItems, setArchaeologistItems] = useState<any[]>([]);
 
+  // Weekly Review state
+  const [showWeeklyReview, setShowWeeklyReview] = useState(false);
+  const [weeklyReviewData, setWeeklyReviewData] = useState<WeeklyReview | null>(null);
+
   useEffect(() => {
     fetchClaws(activeFilter);
+    checkWeeklyReview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFilter, fetchClaws]);
+
+  const checkWeeklyReview = async () => {
+    const shouldShow = await weeklyReview.shouldShowReview();
+    if (shouldShow) {
+      const review = await weeklyReview.generateReview();
+      setWeeklyReviewData(review);
+      setShowWeeklyReview(true);
+    }
+  };
 
   useEffect(() => {
     if (error) {
@@ -208,28 +225,49 @@ export default function VaultScreen() {
     setSelectedItem(null);
   };
 
+  const [isActionLoading, setIsActionLoading] = useState(false);
+
   const handleExtend = async (days: number) => {
-    if (!selectedItem) return;
+    if (!selectedItem || isActionLoading) return;
+    setIsActionLoading(true);
     try {
       await extendClaw(selectedItem.id, days);
+      setActionSheetVisible(false);
       Alert.alert('✓ Extended', `Added ${days} days to this item`);
     } catch (error) {
       Alert.alert('Error', 'Could not extend item');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
   const handleStrike = async () => {
-    if (!selectedItem) return;
+    if (!selectedItem || isActionLoading) return;
+    setIsActionLoading(true);
     try {
       await strikeClaw(selectedItem.id);
+      
+      // Track achievement
+      const unlocked = await achievementEngine.recordStrike(selectedItem.category, selectedItem.is_vip);
+      if (unlocked.length > 0) {
+        Alert.alert(
+          '🏆 Achievement Unlocked!',
+          unlocked.map(a => `${a.icon} ${a.name}`).join('\n')
+        );
+      }
+      
+      setActionSheetVisible(false);
       Alert.alert('✓ Struck!', 'Item marked as complete');
     } catch (error) {
       Alert.alert('Error', 'Could not strike item');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
   const handleDelete = () => {
-    if (!selectedItem) return;
+    if (!selectedItem || isActionLoading) return;
+    setActionSheetVisible(false);
     Alert.alert(
       'Delete Item?',
       'This cannot be undone.',
@@ -332,7 +370,7 @@ export default function VaultScreen() {
   };
 
   return (
-    <LinearGradient colors={colors.gradient.background} style={styles.container}>
+    <LinearGradient colors={[...colors.gradient.background]} style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your Vault</Text>
@@ -401,6 +439,7 @@ export default function VaultScreen() {
         title={selectedItem?.title || selectedItem?.content}
         options={getActionSheetOptions()}
         onClose={handleCloseActionSheet}
+        isLoading={isActionLoading}
       />
 
       {/* VIP Dark Alerts */}
@@ -474,6 +513,19 @@ export default function VaultScreen() {
         onCloseAll={async () => {
           await dismissAllItems();
           setShowArchaeologist(false);
+        }}
+      />
+
+      {/* Weekly Review Modal */}
+      <WeeklyReviewModal
+        visible={showWeeklyReview}
+        review={weeklyReviewData}
+        onClose={() => {
+          setShowWeeklyReview(false);
+          weeklyReview.markReviewSeen();
+        }}
+        onSetGoal={(goal) => {
+          Alert.alert('Goal Set!', `Goal: ${goal}`);
         }}
       />
     </LinearGradient>

@@ -8,6 +8,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../theme';
 
 interface AIEnergyMeterProps {
   used: number;
@@ -59,10 +60,10 @@ export default function AIEnergyMeter({
   }, [remaining, percentage, isPro]);
 
   const getStatusColor = () => {
-    if (isPro) return '#FFD700'; // Gold for Pro
-    if (percentage > 60) return '#4CAF50'; // Green
-    if (percentage > 30) return '#FFD700'; // Yellow
-    return '#e94560'; // Red (low)
+    if (isPro) return colors.gold.DEFAULT; // Gold for Pro
+    if (percentage > 60) return colors.success.DEFAULT; // Green
+    if (percentage > 30) return colors.gold.DEFAULT; // Yellow
+    return colors.danger.DEFAULT; // Red (low)
   };
 
   const getStatusText = () => {
@@ -142,7 +143,7 @@ export default function AIEnergyMeter({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#2d2d44',
+    backgroundColor: colors.surface.elevated,
     borderRadius: 16,
     padding: 12,
     marginHorizontal: 16,

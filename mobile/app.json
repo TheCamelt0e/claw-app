@@ -42,7 +42,8 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "WAKE_LOCK",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "CAMERA"
       ]
     },
     "web": {
@@ -71,7 +72,14 @@
           "microphonePermission": "CLAW uses your microphone to capture voice intentions.",
           "speechRecognitionPermission": "CLAW uses speech recognition to convert your voice to text (works offline using your phone's engine)."
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CLAW uses your camera to capture books, products, and other items visually."
+        }
+      ],
+      "./plugins/withAndroidWidgets"
     ],
     "extra": {
       "eas": {

@@ -32,8 +32,8 @@ export const Input = forwardRef<TextInput, InputProps>(
         )}
         <View style={[
           styles.inputContainer,
-          error && styles.inputError,
-          props.editable === false && styles.inputDisabled,
+          error ? styles.inputError : undefined,
+          props.editable === false ? styles.inputDisabled : undefined,
         ]}>
           <TextInput
             ref={ref}

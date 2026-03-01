@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useAuthStore } from '../store/authStore';
+import { colors } from '../theme';
 
 export default function LoginScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -308,7 +309,7 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: 16,
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     marginTop: 8,
   },
   modeToggleContainer: {
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   modeTabTextActive: {
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
   },
   formContainer: {
     backgroundColor: 'rgba(15, 52, 96, 0.5)',

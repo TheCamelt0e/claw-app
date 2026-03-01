@@ -23,7 +23,7 @@ interface NotificationState {
   checkAllNotifications: () => Promise<any[]>;
   setAlarm: (clawId: string, date: Date) => Promise<boolean>;
   addToCalendar: (clawId: string) => Promise<boolean>;
-  fetchSuggestions: () => Promise<void>;
+  fetchSuggestions: () => Promise<() => void>;
   generateLocalSuggestions: () => Promise<void>;
   clearSuggestions: () => void;
   checkLocationStatus: () => Promise<boolean>;

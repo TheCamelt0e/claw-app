@@ -323,6 +323,105 @@ Return ONLY the JSON array."""
         except Exception:
             return []
     
+    async def analyze_image(self, image_base64: str, mime_type: str = "image/jpeg") -> Dict:
+        """
+        Analyze an image using Gemini Vision API
+        Returns structured data about what's in the image
+        """
+        can_proceed, retry_after = _rate_limiter.can_make_request()
+        if not can_proceed:
+            return {
+                "success": False,
+                "error": "RATE_LIMIT_EXCEEDED",
+                "message": "The AI is thinking too hard! Please wait 60 seconds.",
+                "retry_after": retry_after
+            }
+        
+        if not self.is_available():
+            return {"success": False, "error": "SERVICE_UNAVAILABLE", "message": "AI not configured"}
+        
+        try:
+            _rate_limiter.record_request()
+            
+            # Create image part from base64
+            image_part = {"mime_type": mime_type, "data": image_base64}
+            
+            prompt = """Analyze this image and identify what the user wants to capture.
+
+This could be:
+- A book cover (extract title, author)
+- A product (extract brand, product name, type)
+- A restaurant menu (extract restaurant name, dish recommendations)
+- A receipt or shopping list
+- A whiteboard or handwritten note
+- Any other object or text
+
+Return a JSON object with these fields:
+{
+    "type": "book" | "product" | "restaurant" | "menu" | "receipt" | "note" | "other",
+    "title": "Brief, descriptive title (max 60 chars)",
+    "description": "What you see in the image",
+    "extracted_text": "Any text visible in the image (OCR)",
+    "category": "book" | "movie" | "restaurant" | "product" | "task" | "idea" | "event" | "gift" | "other",
+    "tags": ["tag1", "tag2", "tag3"],
+    "action_type": "buy" | "read" | "watch" | "try" | "visit" | "call" | "schedule" | "research" | "remember",
+    "confidence": 0.0-1.0,
+    "expiry_days": suggested expiry (3 for perishables, 14 for shopping, 30 for books/media),
+    "brand": "brand name if visible, else null",
+    "location_context": "where this was captured (restaurant name, store name, etc.) if apparent"
+}
+
+Be specific and actionable. If it's a book, include the title. If it's a product, include what it is."""
+
+            # Generate content with image
+            response = await self._client.generate_content_async([prompt, image_part])
+            
+            text = self._clean_json_response(response.text)
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as e:
+                print(f"[Gemini Vision] JSON parse error: {e}")
+                print(f"[Gemini Vision] Raw response: {text[:200]}...")
+                return {
+                    "success": False,
+                    "error": "PARSE_ERROR",
+                    "message": "AI response was malformed. Please try again."
+                }
+            
+            return {
+                "success": True,
+                "data": {
+                    "type": data.get("type", "other"),
+                    "title": data.get("title", "Captured item"),
+                    "description": data.get("description", ""),
+                    "extracted_text": data.get("extracted_text", ""),
+                    "category": data.get("category", "other"),
+                    "tags": data.get("tags", []),
+                    "action_type": data.get("action_type", "remember"),
+                    "confidence": data.get("confidence", 0.8),
+                    "expiry_days": data.get("expiry_days", 7),
+                    "brand": data.get("brand"),
+                    "location_context": data.get("location_context"),
+                    "source": "gemini_vision"
+                }
+            }
+            
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "Resource has been exhausted" in error_str:
+                return {
+                    "success": False,
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "message": "The AI is thinking too hard! Please wait 60 seconds.",
+                    "retry_after": 60
+                }
+            
+            return {
+                "success": False,
+                "error": "PROCESSING_ERROR",
+                "message": f"AI vision error: {error_str}"
+            }
+    
     def get_usage_stats(self) -> Dict:
         now = datetime.utcnow()
         one_minute_ago = now - timedelta(minutes=1)

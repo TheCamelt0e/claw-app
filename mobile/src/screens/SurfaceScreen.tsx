@@ -27,16 +27,16 @@ import { formatDistanceToNow } from '../utils/dateUtils';
 
 const { width } = Dimensions.get('window');
 
-// Real Icelandic store context
+// Real Icelandic store context - using theme colors
 const STORE_CONTEXTS: any = {
-  bonus: { icon: 'cart', color: colors.primary.DEFAULT, label: 'At Bónus' },
-  kronan: { icon: 'cart', color: colors.success.DEFAULT, label: 'At Krónan' },
-  hagkaup: { icon: 'storefront', color: colors.someday.DEFAULT, label: 'At Hagkaup' },
-  costco: { icon: 'warehouse', color: colors.danger.DEFAULT, label: 'At Costco' },
-  netto: { icon: 'basket', color: colors.warning.DEFAULT, label: 'At Nettó' },
-  penninn: { icon: 'book', color: colors.info.DEFAULT, label: 'At Penninn' },
-  kaffitar: { icon: 'cafe', color: colors.text.muted, label: 'At Kaffitár' },
-  default: { icon: 'flash', color: colors.primary.DEFAULT, label: 'Right now' },
+  bonus: { icon: 'cart', color: '#FF6B35', label: 'At Bónus' },
+  kronan: { icon: 'cart', color: '#4CAF50', label: 'At Krónan' },
+  hagkaup: { icon: 'storefront', color: '#9C27B0', label: 'At Hagkaup' },
+  costco: { icon: 'warehouse', color: '#e94560', label: 'At Costco' },
+  netto: { icon: 'basket', color: '#FF9800', label: 'At Nettó' },
+  penninn: { icon: 'book', color: '#2196F3', label: 'At Penninn' },
+  kaffitar: { icon: 'cafe', color: '#888888', label: 'At Kaffitár' },
+  default: { icon: 'flash', color: '#FF6B35', label: 'Right now' },
 };
 
 export default function SurfaceScreen() {
@@ -45,6 +45,9 @@ export default function SurfaceScreen() {
   const [nearbyStores, setNearbyStores] = useState<any[]>([]);
   const [userPatterns, setUserPatterns] = useState<any>(null);
   const [isLoadingPatterns, setIsLoadingPatterns] = useState(false);
+  const [patternsError, setPatternsError] = useState<string | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [newAchievements, setNewAchievements] = useState<any[]>([]);
   
   const { surfaceClaws, fetchSurfaceClaws, strikeClaw, releaseClaw, error, clearError } = useClawStore();
   const [strikedIds, setStrikedIds] = useState<string[]>([]);
@@ -72,8 +75,10 @@ export default function SurfaceScreen() {
 
   const getCurrentLocation = async () => {
     try {
+      setLocationError(null);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
+        setLocationError('Location permission denied. Enable in Settings for store reminders.');
         return;
       }
 
@@ -90,29 +95,42 @@ export default function SurfaceScreen() {
       await checkNearbyStores(location.coords.latitude, location.coords.longitude);
     } catch (error) {
       console.error('Location error:', error);
+      setLocationError('Could not get your location');
     }
   };
 
   const checkNearbyStores = async (lat: number, lng: number) => {
     try {
+      setLocationError(null);
       const response = await apiRequest('GET', '/notifications/nearby-stores', undefined, {
         lat,
         lng,
         radius: 500,
-      });
-      setNearbyStores(response?.stores || []);
+      }) as { stores?: any[] };
+      const stores = response?.stores || [];
+      setNearbyStores(stores);
+      
+      // Track location visit for patterns (TODO: implement pattern tracking)
+      // if (stores.length > 0) {
+      //   const closest = stores[0];
+      //   await patternTracker.recordLocationVisit(closest.chain.toLowerCase());
+      //   await achievementEngine.recordLocationVisit(closest.chain.toLowerCase());
+      // }
     } catch (error) {
       console.error('Nearby stores error:', error);
+      setLocationError('Could not load nearby stores');
     }
   };
 
   const fetchUserPatterns = async () => {
     setIsLoadingPatterns(true);
+    setPatternsError(null);
     try {
-      const response = await apiRequest('GET', '/notifications/my-patterns');
+      const response = await apiRequest('GET', '/notifications/my-patterns') as { patterns?: any } | any;
       setUserPatterns(response?.patterns || response || []);
     } catch (error) {
       console.error('Patterns error:', error);
+      setPatternsError('Could not load your patterns');
     } finally {
       setIsLoadingPatterns(false);
     }
@@ -131,6 +149,12 @@ export default function SurfaceScreen() {
     } catch (error) {
       console.error('Pattern logging error:', error);
     }
+
+    // Track strike for achievements (TODO: implement achievement tracking)
+    // const unlocked = await achievementEngine.recordStrike(category);
+    // if (unlocked.length > 0) {
+    //   setNewAchievements(unlocked);
+    // }
     
     // Animate then remove
     setTimeout(() => {
@@ -264,10 +288,26 @@ export default function SurfaceScreen() {
       {renderNearbyBanner()}
 
       {/* AI Suggestion */}
-      {smartSuggestion && (
+      {smartSuggestion && !patternsError && (
         <View style={styles.aiSuggestion}>
           <Ionicons name="sparkles" size={16} color="#7ee8fa" />
           <Text style={styles.aiText}>{smartSuggestion.message}</Text>
+        </View>
+      )}
+
+      {/* Patterns Error */}
+      {patternsError && (
+        <View style={[styles.aiSuggestion, { backgroundColor: 'rgba(233, 69, 96, 0.1)', borderLeftColor: '#e94560' }]}>
+          <Ionicons name="warning" size={16} color="#e94560" />
+          <Text style={[styles.aiText, { color: '#e94560' }]}>{patternsError}</Text>
+        </View>
+      )}
+
+      {/* Location Error */}
+      {locationError && (
+        <View style={[styles.nearbyBanner, { backgroundColor: 'rgba(233, 69, 96, 0.15)' }]}>
+          <Ionicons name="location-outline" size={20} color="#e94560" />
+          <Text style={[styles.nearbyText, { color: '#e94560' }]}>{locationError}</Text>
         </View>
       )}
 
@@ -330,24 +370,24 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.text.primary,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: '#888',
+    color: colors.text.muted,
     marginTop: 4,
   },
   nearbyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 53, 0.15)',
+    backgroundColor: colors.primary.muted,
     marginHorizontal: 16,
     padding: 12,
     borderRadius: 12,
     marginBottom: 12,
   },
   nearbyText: {
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     fontSize: 14,
     marginLeft: 8,
     fontWeight: '600',
@@ -355,16 +395,16 @@ const styles = StyleSheet.create({
   aiSuggestion: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(126, 232, 250, 0.1)',
+    backgroundColor: colors.info.muted,
     marginHorizontal: 16,
     padding: 12,
     borderRadius: 12,
     marginBottom: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#7ee8fa',
+    borderLeftColor: colors.info.DEFAULT,
   },
   aiText: {
-    color: '#7ee8fa',
+    color: colors.info.light,
     fontSize: 14,
     marginLeft: 8,
   },
@@ -372,12 +412,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#0f3460',
+    backgroundColor: colors.surface.DEFAULT,
     borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
+    borderLeftColor: colors.primary.DEFAULT,
   },
   cardStriked: {
     opacity: 0.5,
@@ -400,12 +440,12 @@ const styles = StyleSheet.create({
   clawTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.text.primary,
     marginBottom: 12,
     lineHeight: 28,
   },
   categoryBadge: {
-    backgroundColor: 'rgba(255, 107, 53, 0.2)',
+    backgroundColor: colors.primary.muted,
     alignSelf: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -413,13 +453,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   categoryText: {
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     fontSize: 12,
     textTransform: 'capitalize',
     fontWeight: '600',
   },
   expiryText: {
-    color: '#666',
+    color: colors.text.muted,
     fontSize: 13,
     marginBottom: 16,
   },
@@ -437,7 +477,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   releaseText: {
-    color: '#888',
+    color: colors.text.muted,
     fontWeight: '600',
     marginLeft: 6,
   },
@@ -470,46 +510,46 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: '#666',
+    color: colors.text.muted,
     textAlign: 'center',
     marginBottom: 32,
   },
   refreshButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 53, 0.1)',
+    backgroundColor: colors.primary.muted,
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 53, 0.3)',
+    borderColor: colors.primary.border,
   },
   refreshText: {
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     fontWeight: '600',
     fontSize: 16,
     marginLeft: 8,
   },
   nearbyStoresBox: {
     marginTop: 32,
-    backgroundColor: '#0f3460',
+    backgroundColor: colors.surface.DEFAULT,
     padding: 16,
     borderRadius: 16,
     width: '100%',
   },
   nearbyStoresTitle: {
-    color: '#fff',
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 12,
   },
   nearbyStoreItem: {
-    color: '#888',
+    color: colors.text.muted,
     fontSize: 14,
     marginBottom: 6,
   },

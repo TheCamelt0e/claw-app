@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   NativeEventEmitter,
   NativeModules,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,6 +26,8 @@ import * as Haptics from 'expo-haptics';
 import { useClawStore } from '../store/clawStore';
 import VipSuccessModal from '../components/VipSuccessModal';
 import DarkAlert from '../components/DarkAlert';
+import DuplicateAlert from '../components/DuplicateAlert';
+import ConversationCapture from '../components/ConversationCapture';
 import { 
   smartAnalyze, 
   isRateLimitError, 
@@ -38,6 +41,11 @@ import { getAIUsage, incrementAIUsage, AIUsageData } from '../service/aiUsage';
 import { useAudioStore } from '../store/audioStore';
 import { playVocab } from '../utils/haptics';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme';
+import SmartSuggestionsWidget from '../features/SmartSuggestionsWidget';
+import CameraCapture from '../camera/CameraCapture';
+import { achievementEngine } from '../achievements/AchievementEngine';
+import { patternTracker } from '../analytics/PatternTracker';
+import { clawsAPI } from '../api/client';
 
 const QUICK_SUGGESTIONS = [
   'Book Sarah recommended',
@@ -72,6 +80,14 @@ export default function CaptureScreen() {
   const [isSomeday, setIsSomeday] = useState(false); // Someday mode (no expiry)
   const [showVipModal, setShowVipModal] = useState(false);
   const [capturedClawId, setCapturedClawId] = useState<string | null>(null);
+  const [showDuplicateAlert, setShowDuplicateAlert] = useState(false);
+  const [duplicateData, setDuplicateData] = useState<{
+    suggestion: string;
+    duplicates: Array<any>;
+  } | null>(null);
+  const [pendingCapture, setPendingCapture] = useState(false);
+  const [showConversation, setShowConversation] = useState(false);
+  const [conversationContent, setConversationContent] = useState('');
   const [showDeadlineAlert, setShowDeadlineAlert] = useState(false);
   const [showAlarmAlert, setShowAlarmAlert] = useState(false);
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
@@ -80,9 +96,12 @@ export default function CaptureScreen() {
   const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
   const [aiUsage, setAiUsage] = useState<AIUsageData | null>(null);
   const [isPro, setIsPro] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [newAchievements, setNewAchievements] = useState<any[]>([]);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const maxDurationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const cameraAnalysisRef = useRef<any>(null);
   const subscriptionsRef = useRef<any[]>([]);
   const isRecordingRef = useRef(false); // Debounce flag
   const { captureClaw, error, clearError, syncStatus } = useClawStore();
@@ -95,6 +114,8 @@ export default function CaptureScreen() {
     checkSpeechAvailability();
     checkAIStatus();
     loadAIUsage();
+    achievementEngine.init();
+    patternTracker.init();
     return () => {
       // Cleanup: Stop recording if component unmounts
       if (isRecordingRef.current) {
@@ -300,8 +321,18 @@ export default function CaptureScreen() {
       if (!speechAvailable) {
         Alert.alert(
           'Voice Not Available',
-          'Voice transcription requires speech recognition. Please use quick suggestions or type.',
-          [{ text: 'OK' }]
+          'Voice transcription requires speech recognition. Please enable microphone permissions in Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => {
+              // @ts-ignore
+              if (Platform.OS === 'ios') {
+                Linking.openURL('app-settings:');
+              } else {
+                Linking.openSettings();
+              }
+            }}
+          ]
         );
         return;
       }
@@ -309,7 +340,25 @@ export default function CaptureScreen() {
     }
   };
 
-  const handleCapture = useCallback(async () => {
+  const checkForDuplicates = async () => {
+    try {
+      const result = await clawsAPI.checkDuplicates(content.trim(), 0.7);
+      if (result.has_duplicates && result.duplicates.length > 0) {
+        setDuplicateData({
+          suggestion: result.suggestion,
+          duplicates: result.duplicates,
+        });
+        setShowDuplicateAlert(true);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log('[Duplicate Check] Error:', error);
+      return false;
+    }
+  };
+
+  const proceedWithCapture = useCallback(async () => {
     if (!content.trim()) return;
     
     // Clear interim text first to prevent UI mismatch during processing
@@ -324,15 +373,48 @@ export default function CaptureScreen() {
     setTimeout(() => playVocab('aiThinking'), 200);
     
     try {
-      // Step 1: Smart AI analysis
-      console.log('[Capture] Getting smart AI analysis...');
-      const aiResult = await smartAnalyze(content.trim(), true);
+      let aiResult: any;
       
-      // Set AI status for UI feedback
-      if (aiResult.source === 'gemini') {
+      // Check if we have camera analysis data to use
+      if (cameraAnalysisRef.current && content.startsWith('[Photo]')) {
+        console.log('[Capture] Using camera AI analysis...');
+        const cameraData = cameraAnalysisRef.current;
+        
+        aiResult = {
+          title: cameraData.title,
+          category: cameraData.category,
+          tags: cameraData.tags,
+          action_type: cameraData.action_type,
+          app_suggestion: cameraData.type === 'book' ? 'amazon' : 
+                         cameraData.type === 'restaurant' ? 'maps' : null,
+          expiry_days: cameraData.expiry_days,
+          urgency: cameraData.confidence > 0.8 ? 'high' : 'medium',
+          context: {
+            who_mentioned: null,
+            where: cameraData.location_context,
+            when_context: null,
+            specific_item: cameraData.brand || cameraData.title,
+          },
+          sentiment: 'neutral',
+          why_capture: cameraData.description || 'Captured via camera',
+          related_ids: [],
+          source: cameraData.source || 'gemini_vision',
+        };
+        
         setAiStatus('success');
+        // Clear camera analysis after use
+        cameraAnalysisRef.current = null;
       } else {
-        setAiStatus('fallback');
+        // Step 1: Smart AI analysis
+        console.log('[Capture] Getting smart AI analysis...');
+        aiResult = await smartAnalyze(content.trim(), true);
+        
+        // Set AI status for UI feedback
+        if (aiResult.source === 'gemini') {
+          setAiStatus('success');
+        } else {
+          setAiStatus('fallback');
+        }
       }
       
       console.log('[Capture] AI Result:', aiResult);
@@ -380,6 +462,10 @@ export default function CaptureScreen() {
         const updatedUsage = await incrementAIUsage();
         setAiUsage(updatedUsage);
       }
+
+      // Track capture in analytics
+      await patternTracker.recordCapture();
+      await achievementEngine.recordCapture();
       
       // Reset state
       setContent('');
@@ -420,6 +506,20 @@ export default function CaptureScreen() {
     }
   }, [content, isPriority, isSomeday, captureClaw, setLastCapture, setLastAnalysis]);
 
+  const handleCapture = useCallback(async () => {
+    if (!content.trim()) return;
+    
+    // Check for duplicates first
+    const hasDuplicates = await checkForDuplicates();
+    if (hasDuplicates) {
+      setPendingCapture(true);
+      return;
+    }
+    
+    // No duplicates, proceed with capture
+    proceedWithCapture();
+  }, [content, proceedWithCapture]);
+
   const handleSuggestionPress = useCallback((suggestion: string, index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPressedChip(index);
@@ -435,7 +535,7 @@ export default function CaptureScreen() {
 
   return (
     <LinearGradient
-      colors={colors.gradient.background}
+      colors={[...colors.gradient.background]}
       style={styles.container}
     >
       <KeyboardAvoidingView
@@ -448,6 +548,15 @@ export default function CaptureScreen() {
             <Text style={styles.title}>What do you want to</Text>
             <Text style={styles.highlight}>remember?</Text>
           </View>
+
+          {/* Smart Suggestions */}
+          <SmartSuggestionsWidget
+            onSuggestionCapture={(suggestion) => {
+              if (suggestion.suggestedClaw) {
+                setContent(suggestion.suggestedClaw.content);
+              }
+            }}
+          />
 
           {/* Quick Suggestions */}
           <View style={styles.suggestionsContainer}>
@@ -564,6 +673,15 @@ export default function CaptureScreen() {
               </View>
               
               <View style={styles.buttonRow}>
+                {/* Camera Button */}
+                <TouchableOpacity
+                  style={styles.cameraButton}
+                  onPress={() => setShowCamera(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="camera" size={22} color={colors.primary.DEFAULT} />
+                </TouchableOpacity>
+
                 {/* Voice Button */}
                 <TouchableOpacity
                   style={[styles.voiceButton, isRecording && styles.recordingActive, !speechAvailable && styles.voiceDisabled]}
@@ -582,7 +700,7 @@ export default function CaptureScreen() {
                   <Ionicons
                     name={isRecording ? 'stop' : 'mic'}
                     size={24}
-                    color={isRecording ? '#fff' : speechAvailable ? '#FF6B35' : '#666'}
+                    color={isRecording ? '#fff' : speechAvailable ? colors.primary.DEFAULT : colors.text.muted}
                   />
                 </TouchableOpacity>
 
@@ -594,6 +712,13 @@ export default function CaptureScreen() {
                     isPriority && styles.captureButtonPriority,
                   ]}
                   onPress={handleCapture}
+                  onLongPress={() => {
+                    if (content.trim()) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      setConversationContent(content.trim());
+                      setShowConversation(true);
+                    }
+                  }}
                   disabled={!content.trim() || isCapturing}
                   activeOpacity={0.8}
                 >
@@ -668,13 +793,13 @@ export default function CaptureScreen() {
             </View>
             <View style={styles.tipRow}>
               <Ionicons 
-                name={aiAvailable === false ? "sparkles" : "sparkles-outline"} 
+                name={aiAvailable === true ? "sparkles" : "sparkles-outline"} 
                 size={20} 
-                color={aiAvailable === false ? "#666" : "#FFD700"} 
+                color={aiAvailable === true ? colors.gold.DEFAULT : colors.text.muted} 
               />
               <Text style={[
                 styles.tipText, 
-                { color: aiAvailable === false ? "#666" : "#FFD700" }
+                { color: aiAvailable === true ? colors.gold.DEFAULT : colors.text.muted }
               ]}>
                 {aiAvailable === false 
                   ? "AI offline - using keyword matching" 
@@ -774,8 +899,12 @@ export default function CaptureScreen() {
               text: 'Make VIP', 
               onPress: () => {
                 setShowAnalysisModal(false);
-                setIsPriority(true);
-                Alert.alert('VIP Mode', 'This item is now high priority! 🔥');
+                setLastAnalysis(null);
+                // Re-capture the same content as VIP
+                setTimeout(() => {
+                  setIsPriority(true);
+                  Alert.alert('VIP Mode Enabled', 'Tap CLAW IT to capture as VIP! 🔥');
+                }, 300);
               }
             },
           ]}
@@ -785,6 +914,113 @@ export default function CaptureScreen() {
           }}
         />
       )}
+
+      {/* Camera Capture Modal */}
+      <CameraCapture
+        visible={showCamera}
+        onClose={() => setShowCamera(false)}
+        onCapture={(uri, analysis) => {
+          setShowCamera(false);
+          
+          // Build rich content from AI analysis
+          const extractedText = analysis.extracted_text 
+            ? `\n\nExtracted text: "${analysis.extracted_text}"` 
+            : '';
+          const brandInfo = analysis.brand 
+            ? ` (${analysis.brand})` 
+            : '';
+          const locationInfo = analysis.location_context 
+            ? ` at ${analysis.location_context}` 
+            : '';
+          
+          setContent(`[Photo] ${analysis.title}${brandInfo}${locationInfo}${extractedText}`);
+          
+          // Store AI analysis in a ref for use during actual capture
+          // This will be used when user taps CLAW IT
+          (cameraAnalysisRef as any).current = analysis;
+          
+          Alert.alert(
+            '📸 Photo Analyzed',
+            `AI identified: "${analysis.title}"\nCategory: ${analysis.category}\nConfidence: ${Math.round(analysis.confidence * 100)}%`,
+            [{ text: 'Review & CLAW it!', style: 'default' }]
+          );
+        }}
+      />
+
+      {/* Duplicate Alert */}
+      {duplicateData && (
+        <DuplicateAlert
+          visible={showDuplicateAlert}
+          suggestion={duplicateData.suggestion}
+          duplicates={duplicateData.duplicates}
+          onClose={() => {
+            setShowDuplicateAlert(false);
+            setPendingCapture(false);
+          }}
+          onCaptureAnyway={() => {
+            setShowDuplicateAlert(false);
+            proceedWithCapture();
+          }}
+          onExtendExisting={async (clawId) => {
+            setShowDuplicateAlert(false);
+            setPendingCapture(false);
+            // Extend the existing claw by 7 days
+            try {
+              await clawsAPI.extend(clawId, 7);
+              Alert.alert('✓ Extended!', 'Existing item extended by 7 days.');
+              setContent('');
+              setInterimText('');
+              setInputKey(prev => prev + 1);
+            } catch (error) {
+              Alert.alert('Error', 'Could not extend item');
+            }
+          }}
+          onViewDuplicates={() => {
+            setShowDuplicateAlert(false);
+            setPendingCapture(false);
+            // Navigate to vault (parent component should handle this)
+            Alert.alert('Go to Vault', 'Check your vault to see all similar items');
+          }}
+        />
+      )}
+
+      {/* Conversation Capture Modal */}
+      <ConversationCapture
+        visible={showConversation}
+        initialContent={conversationContent}
+        onClose={() => {
+          setShowConversation(false);
+          setConversationContent('');
+        }}
+        onComplete={(enrichedData) => {
+          setShowConversation(false);
+          setConversationContent('');
+          
+          // Update content with enriched data
+          if (enrichedData.final_content) {
+            setContent(enrichedData.final_content);
+          }
+          
+          // Store enriched data for capture
+          (cameraAnalysisRef as any).current = {
+            title: enrichedData.final_content,
+            category: enrichedData.category,
+            tags: enrichedData.tags || [],
+            action_type: 'remember',
+            app_suggestion: null,
+            expiry_days: enrichedData.urgency === 'high' ? 3 : 7,
+            urgency: enrichedData.urgency || 'medium',
+            context: enrichedData.context || {},
+            sentiment: 'neutral',
+            why_capture: enrichedData.conversation_summary,
+            related_ids: [],
+            source: 'conversation',
+          };
+          
+          // Proceed with capture
+          setTimeout(() => proceedWithCapture(), 100);
+        }}
+      />
     </LinearGradient>
   );
 }
@@ -928,6 +1164,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.sm,
+  },
+  cameraButton: {
+    width: spacing['5xl'],
+    height: spacing['5xl'],
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.surface.elevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border.DEFAULT,
   },
   voiceButton: {
     width: spacing['5xl'],

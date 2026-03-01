@@ -434,3 +434,94 @@ async def categorize_endpoint(
         "source": result.source,
         "message": result.message
     }
+
+
+# ============ IMAGE/VISION ANALYSIS ============
+
+class ImageAnalysisRequest(BaseModel):
+    image_base64: str = Field(..., description="Base64-encoded image data")
+    mime_type: str = Field(default="image/jpeg", description="Image MIME type")
+
+
+class ImageAnalysisResponse(BaseModel):
+    success: bool
+    type: str
+    title: str
+    description: str
+    extracted_text: str
+    category: str
+    tags: List[str]
+    action_type: str
+    confidence: float
+    expiry_days: int
+    brand: Optional[str] = None
+    location_context: Optional[str] = None
+    source: str
+    message: Optional[str] = None
+
+
+@router.post("/analyze-image", response_model=ImageAnalysisResponse)
+async def analyze_image_endpoint(
+    request: ImageAnalysisRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Analyze an image using Gemini Vision API
+    Extracts text, identifies objects, suggests category and tags
+    Requires authentication
+    """
+    # Validate image data
+    if not request.image_base64 or len(request.image_base64) < 100:
+        raise HTTPException(status_code=400, detail="Invalid image data")
+    
+    # Check image size (max 4MB base64 ~ 5.3MB raw)
+    max_base64_size = 4 * 1024 * 1024  # 4MB
+    if len(request.image_base64) > max_base64_size:
+        raise HTTPException(status_code=413, detail="Image too large. Max 4MB.")
+    
+    # Analyze image
+    result = await gemini_service.analyze_image(request.image_base64, request.mime_type)
+    
+    if result["success"]:
+        data = result["data"]
+        return ImageAnalysisResponse(
+            success=True,
+            type=data.get("type", "other"),
+            title=data.get("title", "Captured item"),
+            description=data.get("description", ""),
+            extracted_text=data.get("extracted_text", ""),
+            category=data.get("category", "other"),
+            tags=data.get("tags", []),
+            action_type=data.get("action_type", "remember"),
+            confidence=data.get("confidence", 0.8),
+            expiry_days=data.get("expiry_days", 7),
+            brand=data.get("brand"),
+            location_context=data.get("location_context"),
+            source="gemini_vision"
+        )
+    
+    # Handle errors
+    if result.get("error") == "RATE_LIMIT_EXCEEDED":
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": result["message"],
+                "retry_after": result.get("retry_after", 60)
+            }
+        )
+    
+    # Return fallback response
+    return ImageAnalysisResponse(
+        success=False,
+        type="other",
+        title="Captured item",
+        description="Could not analyze image",
+        extracted_text="",
+        category="other",
+        tags=["captured"],
+        action_type="remember",
+        confidence=0.0,
+        expiry_days=7,
+        source="fallback",
+        message=result.get("message", "AI vision unavailable")
+    )

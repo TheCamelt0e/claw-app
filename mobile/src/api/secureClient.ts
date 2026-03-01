@@ -3,8 +3,23 @@
  * Adds API key authentication, request signing, and certificate pinning
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
+
+// Expo Crypto types
+interface CryptoModule {
+  CryptoDigestAlgorithm: {
+    SHA256: string;
+  };
+  getRandomBytesAsync(size: number): Promise<Uint8Array>;
+  digestStringAsync(algorithm: string, data: string): Promise<string>;
+}
+
+let Crypto: CryptoModule | null = null;
+try {
+  Crypto = require('expo-crypto');
+} catch {
+  console.warn('[SecureClient] expo-crypto not available, using fallback');
+}
 
 // ==========================================
 // SECURITY CONFIGURATION
@@ -30,10 +45,15 @@ export async function getDeviceId(): Promise<string> {
   
   if (!deviceId) {
     // Generate unique device ID
-    const randomBytes = await Crypto.getRandomBytesAsync(16);
-    deviceId = Array.from(randomBytes)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
+    if (Crypto) {
+      const randomBytes = await Crypto.getRandomBytesAsync(16);
+      deviceId = Array.from(randomBytes)
+        .map((b: number) => b.toString(16).padStart(2, '0'))
+        .join('');
+    } else {
+      // Fallback: use Math.random if crypto not available
+      deviceId = Array.from({length: 16}, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+    }
     await AsyncStorage.setItem(DEVICE_ID_KEY, deviceId);
   }
   
@@ -51,6 +71,11 @@ async function generateRequestSignature(
   timestamp: string,
   deviceId: string
 ): Promise<string> {
+  if (!Crypto) {
+    // Fallback: return simple hash if crypto not available
+    return Math.random().toString(36).substring(2);
+  }
+  
   // Create body hash
   const bodyHash = body 
     ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body)

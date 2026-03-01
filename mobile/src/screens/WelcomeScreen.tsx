@@ -186,11 +186,11 @@ const styles = StyleSheet.create({
     fontSize: 42,
     fontWeight: 'bold',
     color: '#fff',
-    letterSpacing: 8,
+    letterSpacing: 6,
   },
   tagline: {
     fontSize: 16,
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     marginTop: 8,
     fontWeight: '500',
   },
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#444',
   },
   dotActive: {
-    backgroundColor: '#FF6B35',
+    backgroundColor: colors.primary.DEFAULT,
     width: 24,
   },
   footer: {

@@ -98,7 +98,7 @@ export default function StrikeScreen({ navigation }: any) {
       if (granted) {
         const started = await startGeofencing();
         setGeofenceActive(true);
-        await refreshSuggestions();
+        await fetchSuggestions();
         alert('✅ Location alerts enabled!\n\nYou\'ll now get notified when near Bónus, Krónan, and other stores.');
       } else {
         alert('❌ Permission denied\n\nPlease enable location permissions in Settings to get store alerts.');
@@ -131,7 +131,7 @@ export default function StrikeScreen({ navigation }: any) {
   useEffect(() => {
     const loadData = async () => {
       await fetchActiveClaws();
-      await refreshSuggestions();
+      await fetchSuggestions();
       await checkAllNotifications();
       await loadSmartSurface();
       
@@ -149,7 +149,7 @@ export default function StrikeScreen({ navigation }: any) {
     setRefreshing(true);
     await Promise.all([
       fetchActiveClaws(),
-      refreshSuggestions(),
+      fetchSuggestions(),
       checkAllNotifications(),
       loadSmartSurface(),
     ]);

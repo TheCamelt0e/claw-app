@@ -25,7 +25,9 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   borderRadius: br = borderRadius.md,
   style,
   testID,
-}) => {
+}: SkeletonProps) => {
+  // Cast width to ViewStyle['width'] to fix TypeScript type inference
+  const skeletonWidth = width as ViewStyle['width'];
   const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -57,7 +59,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
     <View
       style={[
         styles.container,
-        { width, height, borderRadius: br },
+        { width: skeletonWidth, height, borderRadius: br },
         style,
       ]}
       testID={testID}

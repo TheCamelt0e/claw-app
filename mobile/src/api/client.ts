@@ -324,6 +324,34 @@ export const clawsAPI = {
   
   createDemoData: () =>
     apiRequest<{message: string, claws: Claw[]}>('POST', '/claws/demo-data'),
+  
+  // Duplicate Detection
+  checkDuplicates: (content: string, threshold: number = 0.7) =>
+    apiRequest<{
+      has_duplicates: boolean;
+      duplicates: Array<Claw & { similarity: number }>;
+      similarity_scores: Record<string, number>;
+      suggestion: string;
+    }>('POST', '/claws/check-duplicates', { content, threshold }),
+  
+  mergeClaws: (keepClawId: string, mergeClawIds: string[]) =>
+    apiRequest<{
+      message: string;
+      kept_claw: Claw;
+      merged_count: number;
+      merged_ids: string[];
+    }>('POST', '/claws/merge', { keep_claw_id: keepClawId, merge_claw_ids: mergeClawIds }),
+  
+  getDuplicatesReport: (threshold: number = 0.75) =>
+    apiRequest<{
+      duplicate_groups: Array<{
+        claws: Claw[];
+        similarity_scores: Record<string, number>;
+        suggestion: string;
+      }>;
+      total_duplicates: number;
+      message: string;
+    }>('GET', '/claws/duplicates-report', undefined, { threshold }),
 };
 
 // ==========================================
@@ -421,7 +449,7 @@ export interface GroupMember {
   email: string;
 }
 
-export interface GroupItem extends Claw {
+export interface GroupItem extends Omit<Claw, 'status'> {
   group_claw_id: string;
   status: 'active' | 'claimed' | 'completed';
   claimed_by?: string;
@@ -467,6 +495,162 @@ export const groupsAPI = {
   
   pollGroupUpdates: (groupId: string) =>
     apiRequest<GroupWithItems>('GET', `/groups/${groupId}`),
+};
+
+// ==========================================
+// USERS API - Streak System 2.0
+// ==========================================
+
+export interface StreakStatus {
+  current_streak: number;
+  longest_streak: number;
+  last_strike_date: string | null;
+  streak_expires_at: string | null;
+  milestones_achieved: string[];
+  // Streak 2.0 fields
+  streak_freezes_available: number;
+  streak_recovery_available: boolean;
+  active_bet: StreakBet | null;
+}
+
+export interface StreakBet {
+  target_strikes: number;
+  current_strikes: number;
+  deadline: string;
+  placed_at: string;
+  reward: string;
+  status: 'active' | 'completed' | 'failed';
+}
+
+export const usersAPI = {
+  /**
+   * Get full streak status including freezes, recovery, and active bet
+   */
+  getStreakStatus: () =>
+    apiRequest<StreakStatus>('GET', '/users/streak-status'),
+  
+  /**
+   * Use a streak freeze to maintain current streak
+   * (1 free freeze per month)
+   */
+  useStreakFreeze: () =>
+    apiRequest<{
+      success: boolean;
+      message: string;
+      freezes_remaining: number;
+    }>('POST', '/users/use-freeze'),
+  
+  /**
+   * Use the one-time streak recovery (restore broken streak)
+   * Only available once per user, restores up to 7 days
+   */
+  useStreakRecovery: () =>
+    apiRequest<{
+      success: boolean;
+      message: string;
+      current_streak: number;
+      recovery_used: boolean;
+    }>('POST', '/users/use-recovery'),
+  
+  /**
+   * Place a bet on achieving X strikes in Y days
+   * Rewards based on difficulty
+   */
+  placeStreakBet: (targetStrikes: number, days: number) =>
+    apiRequest<{
+      success: boolean;
+      message: string;
+      bet: StreakBet;
+    }>('POST', '/users/place-bet', { target_strikes: targetStrikes, days }),
+  
+  /**
+   * Cancel active streak bet (forfeits any progress)
+   */
+  cancelStreakBet: () =>
+    apiRequest<{
+      success: boolean;
+      message: string;
+    }>('POST', '/users/cancel-bet'),
+};
+
+// ==========================================
+// CONVERSATION API
+// ==========================================
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+}
+
+export interface ConversationResponse {
+  session_id: string;
+  messages: ConversationMessage[];
+  current_summary: string;
+  suggested_next_question?: string;
+  enriched_data: {
+    original_content: string;
+    refined_title: string;
+    category: string | null;
+    context: {
+      who_mentioned?: string;
+      where?: string;
+      when?: string;
+      why_important?: string;
+    };
+    urgency: 'low' | 'medium' | 'high';
+    tags: string[];
+    is_complete?: boolean;
+  };
+  is_complete: boolean;
+}
+
+export interface FinalizedCapture {
+  session_id: string;
+  final_content: string;
+  original_content: string;
+  category: string;
+  tags: string[];
+  context: {
+    who_mentioned?: string;
+    where?: string;
+    when?: string;
+    why_important?: string;
+  };
+  urgency: 'low' | 'medium' | 'high';
+  conversation_summary: string;
+  full_conversation: Array<{ role: string; content: string }>;
+}
+
+export const conversationAPI = {
+  /**
+   * Start a conversational capture session
+   * AI will ask clarifying questions based on initial content
+   */
+  start: (initialContent: string) =>
+    apiRequest<ConversationResponse>('POST', '/conversation/start', { initial_content: initialContent }),
+  
+  /**
+   * Continue the conversation with user's response
+   */
+  continue: (sessionId: string, message: string) =>
+    apiRequest<ConversationResponse>('POST', '/conversation/continue', { 
+      session_id: sessionId, 
+      message 
+    }),
+  
+  /**
+   * Finalize and get enriched capture data
+   * Call this when conversation is complete
+   */
+  finalize: (sessionId: string) =>
+    apiRequest<FinalizedCapture>('POST', '/conversation/finalize', { session_id: sessionId }),
+  
+  /**
+   * Cancel and delete a conversation session
+   */
+  cancel: (sessionId: string) =>
+    apiRequest<{ message: string }>('DELETE', `/conversation/session/${sessionId}`),
 };
 
 // ==========================================

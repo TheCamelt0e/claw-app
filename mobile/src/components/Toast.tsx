@@ -4,6 +4,7 @@
  */
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
+import { colors } from '../theme';
 
 interface ToastProps {
   visible: boolean;
@@ -35,17 +36,17 @@ export default function Toast({ visible, message, type = 'success', onHide }: To
 
   if (!visible) return null;
 
-  const colors = {
-    success: '#4CAF50',
-    error: '#e94560',
-    info: '#FF6B35',
+  const toastColors = {
+    success: colors.success.DEFAULT,
+    error: colors.danger.DEFAULT,
+    info: colors.primary.DEFAULT,
   };
 
   return (
     <Animated.View 
       style={[
         styles.container,
-        { opacity: fadeAnim, backgroundColor: colors[type] }
+        { opacity: fadeAnim, backgroundColor: toastColors[type] }
       ]}
     >
       <Text style={styles.text}>{message}</Text>

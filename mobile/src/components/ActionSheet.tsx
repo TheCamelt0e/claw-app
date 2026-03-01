@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../theme';
 
 const { height } = Dimensions.get('window');
 
@@ -28,9 +29,10 @@ interface ActionSheetProps {
   title?: string;
   options: ActionSheetOption[];
   onClose: () => void;
+  isLoading?: boolean;
 }
 
-export default function ActionSheet({ visible, title, options, onClose }: ActionSheetProps) {
+export default function ActionSheet({ visible, title, options, onClose, isLoading }: ActionSheetProps) {
   const slideAnim = React.useRef(new Animated.Value(height)).current;
 
   React.useEffect(() => {
@@ -85,15 +87,17 @@ export default function ActionSheet({ visible, title, options, onClose }: Action
                       styles.option,
                       index < options.length - 1 && styles.optionBorder,
                       option.destructive && styles.destructiveOption,
+                      isLoading && { opacity: 0.5 },
                     ]}
-                    onPress={() => handleOptionPress(option.onPress)}
-                    activeOpacity={0.7}
+                    onPress={() => !isLoading && handleOptionPress(option.onPress)}
+                    activeOpacity={isLoading ? 1 : 0.7}
+                    disabled={isLoading}
                   >
                     {option.icon && (
                       <Ionicons 
                         name={option.icon as any} 
                         size={20} 
-                        color={option.destructive ? '#e94560' : '#fff'} 
+                        color={option.destructive ? colors.danger.DEFAULT : colors.text.primary} 
                         style={styles.optionIcon}
                       />
                     )}
@@ -103,8 +107,10 @@ export default function ActionSheet({ visible, title, options, onClose }: Action
                     ]}>
                       {option.text}
                     </Text>
-                    {!option.destructive && option.text !== 'Cancel' && (
-                      <Ionicons name="chevron-forward" size={18} color="#666" />
+                    {isLoading ? (
+                      <Ionicons name="hourglass" size={18} color={colors.text.muted} />
+                    ) : !option.destructive && option.text !== 'Cancel' && (
+                      <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
                     )}
                   </TouchableOpacity>
                 ))}
@@ -137,12 +143,12 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   titleContainer: {
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.background.DEFAULT,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   title: {
     color: '#888',
@@ -150,7 +156,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   optionsContainer: {
-    backgroundColor: '#0f3460',
+    backgroundColor: colors.background.elevated,
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 12,
@@ -163,7 +169,7 @@ const styles = StyleSheet.create({
   },
   optionBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a2e',
+    borderBottomColor: colors.background.DEFAULT,
   },
   destructiveOption: {
     // No special styling needed
@@ -173,23 +179,23 @@ const styles = StyleSheet.create({
   },
   optionText: {
     flex: 1,
-    color: '#fff',
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: '500',
   },
   destructiveText: {
-    color: '#e94560',
+    color: colors.danger.DEFAULT,
   },
   cancelButton: {
-    backgroundColor: '#1a1a2e',
+    backgroundColor: colors.background.DEFAULT,
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   cancelText: {
-    color: '#FF6B35',
+    color: colors.primary.DEFAULT,
     fontSize: 16,
     fontWeight: '600',
   },
