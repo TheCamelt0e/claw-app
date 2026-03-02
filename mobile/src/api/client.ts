@@ -1,52 +1,28 @@
 /**
  * API Client for CLAW - SECURITY HARDENED
  * Using native fetch (React Native compatible)
+ * 
+ * FORCE PRODUCTION: Always use production backend
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // ==========================================
-// PRODUCTION BACKEND URL
+// PRODUCTION BACKEND URL - ALWAYS USE THIS
 // ==========================================
 const PRODUCTION_API_URL = 'https://claw-api-b5ts.onrender.com/api/v1';
-const DEVELOPMENT_API_URL = 'http://localhost:8000/api/v1';
 
-// Determine which URL to use
-// Check if running on emulator/simulator
-const isDevelopment = __DEV__;
-const isAndroid = Platform.OS === 'android';
-const isIOS = Platform.OS === 'ios';
+// FORCE PRODUCTION URL - Comment out the line below for local development
+export const API_BASE_URL = PRODUCTION_API_URL;
 
-// For Android emulator, use 10.0.2.2 to access host localhost
-// For iOS simulator, use localhost
-// For production builds, always use production URL
-let API_BASE_URL: string;
+// For local development only - uncomment this line:
+// export const API_BASE_URL = 'http://10.0.2.2:8000/api/v1'; // Android emulator
+// export const API_BASE_URL = 'http://localhost:8000/api/v1'; // iOS simulator
 
-if (!isDevelopment) {
-  // Production build - always use production
-  API_BASE_URL = PRODUCTION_API_URL;
-} else if (isAndroid) {
-  // Android emulator
-  API_BASE_URL = 'http://10.0.2.2:8000/api/v1';
-} else if (isIOS) {
-  // iOS simulator
-  API_BASE_URL = 'http://localhost:8000/api/v1';
-} else {
-  // Fallback
-  API_BASE_URL = PRODUCTION_API_URL;
-}
-
-// Allow override via environment-like variable (for testing)
-// @ts-ignore
-if (global.CLAW_API_URL) {
-  // @ts-ignore
-  API_BASE_URL = global.CLAW_API_URL;
-}
-
-export { API_BASE_URL };
-
+console.log('[CLAW] ==========================================');
 console.log('[CLAW] API URL:', API_BASE_URL);
-console.log('[CLAW] Platform:', Platform.OS, '| Development:', isDevelopment);
+console.log('[CLAW] Platform:', Platform.OS);
+console.log('[CLAW] ==========================================');
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -723,5 +699,77 @@ export const apiClient = {
   get: <T>(url: string, config?: any) => apiRequest<T>('GET', url, undefined, config?.params),
   post: <T>(url: string, data?: any, config?: any) => apiRequest<T>('POST', url, data, config?.params),
 };
+
+// ==========================================
+// CONNECTION TEST - Run on app startup
+// ==========================================
+
+export interface ConnectionTestResult {
+  success: boolean;
+  status: 'connected' | 'error';
+  message: string;
+  responseTime?: number;
+}
+
+/**
+ * Test connection to backend
+ * Call this on app startup to verify connectivity
+ */
+export async function testConnection(): Promise<ConnectionTestResult> {
+  const startTime = Date.now();
+  const baseUrl = API_BASE_URL.replace('/api/v1', '');
+  
+  console.log('[CONNECTION TEST] Testing connection to:', baseUrl);
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const response = await fetch(`${baseUrl}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    clearTimeout(timeoutId);
+    const responseTime = Date.now() - startTime;
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[CONNECTION TEST] ✓ Success:', data.status, `(${responseTime}ms)`);
+      return {
+        success: true,
+        status: 'connected',
+        message: `Connected to ${data.service} v${data.version}`,
+        responseTime,
+      };
+    } else {
+      console.log('[CONNECTION TEST] ✗ HTTP error:', response.status);
+      return {
+        success: false,
+        status: 'error',
+        message: `Server returned ${response.status}`,
+        responseTime,
+      };
+    }
+  } catch (error: any) {
+    const responseTime = Date.now() - startTime;
+    console.error('[CONNECTION TEST] ✗ Failed:', error.message);
+    
+    let message = 'Cannot connect to server';
+    if (error.name === 'AbortError') {
+      message = 'Connection timed out (10s)';
+    } else if (error.message?.includes('Network')) {
+      message = 'Network error - check internet connection';
+    }
+    
+    return {
+      success: false,
+      status: 'error',
+      message,
+      responseTime,
+    };
+  }
+}
 
 export default apiClient;

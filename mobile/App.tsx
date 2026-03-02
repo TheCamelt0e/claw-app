@@ -35,6 +35,7 @@ import SyncStatus from './src/components/SyncStatus';
 import LivingSplash from './src/components/LivingSplash';
 import { useAudioStore } from './src/store/audioStore';
 import { colors, spacing, shadows } from './src/theme';
+import { testConnection } from './src/api/client';
 
 // Settings screens
 import NotificationsScreen from './src/screens/NotificationsScreen';
@@ -97,8 +98,8 @@ function MainTabs() {
   );
 }
 
-// Loading screen
-function LoadingScreen() {
+// Loading screen with connection status
+function LoadingScreen({ status }: { status: string }) {
   return (
     <LinearGradient
       colors={['#1a1a2e', '#16213e', '#0f3460']}
@@ -106,6 +107,7 @@ function LoadingScreen() {
     >
       <ActivityIndicator size="large" color="#FF6B35" />
       <Text style={styles.loadingText}>Loading CLAW...</Text>
+      {status && <Text style={styles.statusText}>{status}</Text>}
     </LinearGradient>
   );
 }
@@ -171,16 +173,50 @@ export default function App() {
   const [showPermissions, setShowPermissions] = useState(false);
   const [permissionsChecked, setPermissionsChecked] = useState(false);
   const [showLivingSplash, setShowLivingSplash] = useState(false);
-  const [hasSeenSplash, setHasSeenSplash] = useState(true); // Skip on first install
+  const [hasSeenSplash, setHasSeenSplash] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState('Checking connection...');
+  const [initError, setInitError] = useState<string | null>(null);
   
   const { loadCachedCapture } = useAudioStore();
 
   useEffect(() => {
-    checkAuth();
-    checkPermissionsStatus();
-    checkSplashStatus();
-    loadCachedCapture();
+    initializeApp();
   }, []);
+  
+  const initializeApp = async () => {
+    try {
+      // Step 1: Test backend connection
+      setConnectionStatus('Connecting to server...');
+      const connResult = await testConnection();
+      
+      if (!connResult.success) {
+        console.error('[App] Connection failed:', connResult.message);
+        setConnectionStatus(`Server error: ${connResult.message}`);
+        // Continue anyway - might be temporary
+      } else {
+        console.log('[App] Connected:', connResult.message);
+        setConnectionStatus('Connected! Checking login...');
+      }
+      
+      // Step 2: Check auth (with timeout)
+      setConnectionStatus('Checking login status...');
+      const authTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Auth check timed out')), 15000)
+      );
+      
+      await Promise.race([checkAuth(), authTimeout]);
+      
+      // Step 3: Check other settings
+      await checkPermissionsStatus();
+      await checkSplashStatus();
+      await loadCachedCapture();
+      
+    } catch (error: any) {
+      console.error('[App] Initialization error:', error);
+      setInitError(error?.message || 'Failed to initialize');
+      setConnectionStatus('Error: ' + (error?.message || 'Unknown error'));
+    }
+  };
   
   const checkSplashStatus = async () => {
     try {
@@ -265,7 +301,24 @@ export default function App() {
   if (isLoading || !permissionsChecked) {
     return (
       <SafeAreaProvider>
-        <LoadingScreen />
+        <LoadingScreen status={connectionStatus} />
+      </SafeAreaProvider>
+    );
+  }
+  
+  // Show error if initialization failed
+  if (initError) {
+    return (
+      <SafeAreaProvider>
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e', '#0f3460']}
+          style={styles.loadingContainer}
+        >
+          <Ionicons name="alert-circle" size={48} color="#e94560" />
+          <Text style={styles.loadingText}>Connection Error</Text>
+          <Text style={styles.errorText}>{initError}</Text>
+          <Text style={styles.retryText}>Please check your internet connection and restart the app.</Text>
+        </LinearGradient>
       </SafeAreaProvider>
     );
   }
@@ -339,6 +392,25 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     fontSize: 18,
     fontWeight: '600',
+  },
+  statusText: {
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+    fontSize: 14,
+  },
+  errorText: {
+    color: '#e94560',
+    marginTop: spacing.md,
+    fontSize: 16,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  retryText: {
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
   },
   tabBar: {
     backgroundColor: colors.background.secondary,

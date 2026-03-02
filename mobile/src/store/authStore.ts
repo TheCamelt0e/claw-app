@@ -329,9 +329,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
 
-      // Get user data
-      console.log('[Auth] Fetching user data with stored token...');
-      const meResponse = await authAPI.getMe();
+      // Get user data with timeout
+      console.log('[AUTH] Fetching user data with stored token...');
+      const meResponse = await Promise.race([
+        authAPI.getMe(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Request timed out')), 10000)
+        )
+      ]);
+      
       console.log('[AUTH] Auth check successful');
       set({
         user: meResponse,
