@@ -5,13 +5,6 @@
     "requireAuth": true
   },
   "build": {
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      }
-    },
-  "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal"
