@@ -18,6 +18,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.claw.app",
       "buildNumber": "1.0.0",
+      "newArchEnabled": false,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "CLAW uses your location to remind you of intentions when you're in the right place.",
         "NSMicrophoneUsageDescription": "CLAW uses your microphone for voice capture of intentions.",
@@ -33,6 +34,7 @@
       },
       "package": "com.claw.app",
       "versionCode": 1,
+      "newArchEnabled": false,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
