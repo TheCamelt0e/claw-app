@@ -9,7 +9,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import './src/sync/OfflineManager'; // Initialize offline detection
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -99,7 +99,14 @@ function MainTabs() {
 }
 
 // Loading screen with connection status
-function LoadingScreen({ status }: { status: string }) {
+function LoadingScreen({ status, onForceContinue }: { status: string; onForceContinue?: () => void }) {
+  const [showForceButton, setShowForceButton] = useState(false);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => setShowForceButton(true), 5000);
+    return () => clearTimeout(timer);
+  }, []);
+  
   return (
     <LinearGradient
       colors={['#1a1a2e', '#16213e', '#0f3460']}
@@ -108,6 +115,11 @@ function LoadingScreen({ status }: { status: string }) {
       <ActivityIndicator size="large" color="#FF6B35" />
       <Text style={styles.loadingText}>Loading CLAW...</Text>
       {status && <Text style={styles.statusText}>{status}</Text>}
+      {showForceButton && onForceContinue && (
+        <TouchableOpacity style={styles.forceButton} onPress={onForceContinue}>
+          <Text style={styles.forceButtonText}>Continue Anyway</Text>
+        </TouchableOpacity>
+      )}
     </LinearGradient>
   );
 }
@@ -167,58 +179,140 @@ function MainStack() {
   );
 }
 
+// IMMEDIATE NUCLEAR TIMEOUT - runs once on module load
+let __nuclearTriggered = false;
+setTimeout(() => {
+  if (!__nuclearTriggered) {
+    console.log('[App] ☢️ IMMEDIATE NUCLEAR TIMEOUT: 15s absolute limit reached');
+    __nuclearTriggered = true;
+    // Force reload the app as last resort
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.reload();
+    }
+  }
+}, 15000);
+
 export default function App() {
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  console.log('[App] COMPONENT MOUNTING - Time:', Date.now());
+  
+  const { isAuthenticated, isLoading, checkAuth, setIsLoading } = useAuthStore();
   const [showWelcome, setShowWelcome] = useState(true);
   const [showPermissions, setShowPermissions] = useState(false);
   const [permissionsChecked, setPermissionsChecked] = useState(false);
   const [showLivingSplash, setShowLivingSplash] = useState(false);
   const [hasSeenSplash, setHasSeenSplash] = useState(true);
-  const [connectionStatus, setConnectionStatus] = useState('Checking connection...');
+  const [connectionStatus, setConnectionStatus] = useState('Starting...');
   const [initError, setInitError] = useState<string | null>(null);
+  const [forceShowApp, setForceShowApp] = useState(false);
+  const initStartedRef = React.useRef(false);
   
   const { loadCachedCapture } = useAudioStore();
 
   useEffect(() => {
+    if (initStartedRef.current) {
+      console.log('[App] Already initialized, skipping');
+      return;
+    }
+    initStartedRef.current = true;
+    console.log('[App] Starting initialization...');
     initializeApp();
   }, []);
   
-  const { setIsLoading } = useAuthStore.getState();
-
-  const initializeApp = async () => {
-    try {
-      // Step 1: Test backend connection
-      setConnectionStatus('Connecting to server...');
-      const connResult = await testConnection();
-      
-      if (!connResult.success) {
-        console.error('[App] Connection failed:', connResult.message);
-        setConnectionStatus(`Server error: ${connResult.message}`);
-        // Continue anyway - might be temporary
-      } else {
-        console.log('[App] Connected:', connResult.message);
-        setConnectionStatus('Connected! Checking login...');
-      }
-      
-      // Step 2: Check auth (with timeout)
-      setConnectionStatus('Checking login status...');
-      const authTimeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Auth check timed out')), 10000)
-      );
-      
-      await Promise.race([checkAuth(), authTimeout]);
-      
-      // Step 3: Check other settings
-      await checkPermissionsStatus();
-      await checkSplashStatus();
-      await loadCachedCapture();
-      
-    } catch (error: any) {
-      console.error('[App] Initialization error:', error);
-      // IMPORTANT: Force set isLoading to false so loading screen disappears
+  // NUCLEAR OPTION 1: Force show after 8 seconds
+  useEffect(() => {
+    console.log('[App] Nuclear timeout 1 armed (8s)');
+    const nuclearTimeout1 = setTimeout(() => {
+      console.log('[App] ☢️ NUCLEAR TIMEOUT 1: 8s reached, forcing show');
+      setForceShowApp(true);
       setIsLoading(false);
-      setInitError(error?.message || 'Failed to initialize');
-      setConnectionStatus('Error: ' + (error?.message || 'Unknown error'));
+      setConnectionStatus('Forced continue (8s timeout)');
+    }, 8000);
+    
+    return () => clearTimeout(nuclearTimeout1);
+  }, []);
+  
+  // NUCLEAR OPTION 2: Force show after 12 seconds (if still loading)
+  useEffect(() => {
+    console.log('[App] Nuclear timeout 2 armed (12s)');
+    const nuclearTimeout2 = setTimeout(() => {
+      console.log('[App] ☢️ NUCLEAR TIMEOUT 2: 12s reached, hard reset');
+      setForceShowApp(true);
+      setIsLoading(false);
+      setPermissionsChecked(true);
+      setConnectionStatus('Emergency bypass (12s)');
+    }, 12000);
+    
+    return () => clearTimeout(nuclearTimeout2);
+  }, []);
+  
+  const initializeApp = async () => {
+    // GLOBAL INIT TIMEOUT: Ensure we never hang for more than 15 seconds total
+    const INIT_TIMEOUT_MS = 15000;
+    const initTimeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('App initialization timed out')), INIT_TIMEOUT_MS)
+    );
+    
+    const doInitialization = async () => {
+      try {
+        // Step 1: Test backend connection (with 5s timeout)
+        setConnectionStatus('Connecting to server...');
+        const connPromise = testConnection();
+        const connTimeout = new Promise<ReturnType<typeof testConnection>>((resolve) => 
+          setTimeout(() => resolve({ success: false, status: 'error', message: 'Connection test timed out' }), 5000)
+        );
+        const connResult = await Promise.race([connPromise, connTimeout]);
+        
+        if (!connResult.success) {
+          console.error('[App] Connection failed:', connResult.message);
+          setConnectionStatus(`Server unavailable: ${connResult.message}`);
+          // Continue anyway - auth check will handle it
+        } else {
+          console.log('[App] Connected:', connResult.message);
+          setConnectionStatus('Connected! Checking login...');
+        }
+        
+        // Step 2: Check auth (with 8s timeout)
+        console.log('[App] Step 2: Starting auth check...');
+        setConnectionStatus('Checking login status...');
+        const authPromise = checkAuth();
+        const authTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Auth check timed out')), 8000)
+        );
+        
+        await Promise.race([authPromise, authTimeout]);
+        console.log('[App] Auth check completed');
+        
+        // Step 3: Check other settings (with individual timeouts)
+        await Promise.race([
+          checkPermissionsStatus(),
+          new Promise((resolve) => setTimeout(resolve, 2000)) // 2s max for permissions
+        ]);
+        await Promise.race([
+          checkSplashStatus(),
+          new Promise((resolve) => setTimeout(resolve, 2000)) // 2s max for splash
+        ]);
+        await Promise.race([
+          loadCachedCapture(),
+          new Promise((resolve) => setTimeout(resolve, 3000)) // 3s max for cache
+        ]);
+        
+      } catch (error: any) {
+        console.error('[App] Initialization error:', error);
+        // IMPORTANT: Force set isLoading to false so loading screen disappears
+        setIsLoading(false);
+        setInitError(error?.message || 'Failed to initialize');
+        setConnectionStatus('Error: ' + (error?.message || 'Unknown error'));
+      }
+    };
+    
+    // Race between initialization and global timeout
+    try {
+      await Promise.race([doInitialization(), initTimeout]);
+    } catch (timeoutError: any) {
+      console.error('[App] Global init timeout:', timeoutError);
+      setIsLoading(false);
+      setInitError('App is taking too long to start. Please restart.');
+      setConnectionStatus('Timeout: App startup took too long');
     }
   };
   
@@ -302,10 +396,22 @@ export default function App() {
     setHasSeenSplash(true);
   };
 
-  if (isLoading || !permissionsChecked) {
+  const shouldShowLoading = (isLoading || !permissionsChecked) && !forceShowApp;
+  console.log('[App] Render - isLoading:', isLoading, 'permissionsChecked:', permissionsChecked, 'forceShowApp:', forceShowApp, 'showLoading:', shouldShowLoading);
+  
+  if (shouldShowLoading) {
+    console.log('[App] Showing loading screen, status:', connectionStatus);
     return (
       <SafeAreaProvider>
-        <LoadingScreen status={connectionStatus} />
+        <LoadingScreen 
+          status={connectionStatus} 
+          onForceContinue={() => {
+            console.log('[App] User forced continue');
+            setForceShowApp(true);
+            setIsLoading(false);
+            setPermissionsChecked(true);
+          }}
+        />
       </SafeAreaProvider>
     );
   }
@@ -401,6 +507,20 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: spacing.sm,
     fontSize: 14,
+  },
+  forceButton: {
+    marginTop: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: 'rgba(255, 107, 53, 0.2)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF6B35',
+  },
+  forceButtonText: {
+    color: '#FF6B35',
+    fontSize: 14,
+    fontWeight: '600',
   },
   errorText: {
     color: '#e94560',

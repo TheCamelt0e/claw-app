@@ -100,8 +100,12 @@ export default function LoginScreen() {
         // Don't show Alert - let them retry immediately
       } else {
         setInfo('');
-        Alert.alert('Login Error', errorMsg);
-        setLocalError(errorMsg);
+        // Ensure we always show a readable error message
+        const displayMsg = errorMsg && errorMsg.length > 0 && !errorMsg.includes('<!DOCTYPE') 
+          ? errorMsg 
+          : 'Connection failed. Please check your internet and try again.';
+        Alert.alert('Login Error', displayMsg);
+        setLocalError(displayMsg);
       }
     } finally {
       setIsLoading(false);

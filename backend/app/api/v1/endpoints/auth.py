@@ -10,6 +10,7 @@ from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -88,6 +89,10 @@ async def register(
     Register a new user and return JWT token
     Rate limited: 5 attempts per minute per IP
     """
+    # Debug logging for mobile app issues
+    print(f"[REGISTER] Request from: {http_request.client.host if http_request.client else 'unknown'}")
+    print(f"[REGISTER] Origin: {http_request.headers.get('origin', 'none')}")
+    print(f"[REGISTER] Email: {request.email[:3]}...{request.email[-10:]}")  # Partial email for privacy
     # Check if email already exists (case-insensitive)
     existing = db.query(User).filter(
         User.email.ilike(request.email)
@@ -160,7 +165,30 @@ async def login(
     Login with email/password and return JWT token
     Brute force protected: 5 failed attempts = 5 minute lockout
     """
+    # Debug logging for mobile app issues
+    client_host = http_request.client.host if http_request.client else 'unknown'
+    origin = http_request.headers.get('origin', 'none')
+    user_agent = http_request.headers.get('user-agent', 'none')[:50]
+    api_key = http_request.headers.get('X-API-Key', 'none')[:20]
+    
+    print(f"[LOGIN] ========== LOGIN REQUEST ==========")
+    print(f"[LOGIN] From: {client_host}")
+    print(f"[LOGIN] Origin: {origin}")
+    print(f"[LOGIN] User-Agent: {user_agent}...")
+    print(f"[LOGIN] API-Key (first 20 chars): {api_key}...")
+    print(f"[LOGIN] Email: {request.email[:3]}...{request.email.split('@')[1] if '@' in request.email else ''}")
+    
     client_ip = get_client_ip(http_request)
+    
+    # Quick DB health check - if this fails, we'll know immediately
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as db_err:
+        print(f"[LOGIN] ✗ Database connection failed: {db_err}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database temporarily unavailable. Please try again in a moment."
+        )
     
     # Find user by email (case-insensitive)
     user = db.query(User).filter(
@@ -190,14 +218,29 @@ async def login(
         )
     
     # Update last active
-    user.last_active_at = datetime.utcnow()
-    db.commit()
+    try:
+        user.last_active_at = datetime.utcnow()
+        db.commit()
+        print(f"[LOGIN] ✓ User {user.id[:8]}... updated last_active")
+    except Exception as e:
+        print(f"[LOGIN] ⚠ Failed to update last_active: {e}")
+        db.rollback()
     
     # Create JWT token with token versioning
-    access_token = create_access_token(
-        data={"sub": user.id},
-        user=user
-    )
+    try:
+        access_token = create_access_token(
+            data={"sub": user.id},
+            user=user
+        )
+        print(f"[LOGIN] ✓ Token created for user {user.id[:8]}...")
+    except Exception as e:
+        print(f"[LOGIN] ✗ Token creation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication error. Please try again."
+        )
+    
+    print(f"[LOGIN] ========== LOGIN SUCCESS ==========")
     
     return {
         "access_token": access_token,

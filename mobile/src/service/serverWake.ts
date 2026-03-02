@@ -37,7 +37,10 @@ async function quickHealthCheck(): Promise<boolean> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT);
     
-    const response = await fetch(`${BASE_URL}/health`, {
+    const healthUrl = `${BASE_URL}/health`;
+    log('Checking health at:', healthUrl);
+    
+    const response = await fetch(healthUrl, {
       method: 'GET',
       signal: controller.signal,
       headers: {
@@ -48,12 +51,15 @@ async function quickHealthCheck(): Promise<boolean> {
     clearTimeout(timeoutId);
     
     if (response.ok) {
-      log('✓ Server is already awake (quick check passed)');
+      const data = await response.json();
+      log('✓ Server is already awake:', data.status);
       return true;
+    } else {
+      log('Health check returned non-OK status:', response.status);
     }
   } catch (error: any) {
     // Expected if server is sleeping
-    log('Quick check failed (server likely sleeping):', error.name);
+    log('Quick check failed (server likely sleeping):', error.name || error.message);
   }
   return false;
 }
@@ -68,6 +74,14 @@ export async function waitForServer(
 ): Promise<boolean> {
   log('Starting server wake sequence...');
   log('Base URL:', BASE_URL);
+  log('Full API URL:', `${BASE_URL}/api/v1`);
+  
+  // Validate URL
+  if (!BASE_URL.startsWith('http')) {
+    log('ERROR: Invalid base URL:', BASE_URL);
+    onProgress?.('Configuration error: Invalid API URL');
+    return false;
+  }
   
   // First: Quick check - maybe server is already awake
   onProgress?.('Checking server...');
@@ -108,28 +122,35 @@ export async function waitForServer(
         onProgress?.('Server waking up, finalizing...');
         await new Promise(r => setTimeout(r, 2000));
         
-        // Verify API is actually responding with a quick auth check
+        // Verify API is actually responding with a quick auth endpoint check
         try {
           const apiController = new AbortController();
           const apiTimeoutId = setTimeout(() => apiController.abort(), 5000);
           
-          const apiResponse = await fetch(`${BASE_URL}/`, {
-            method: 'HEAD',
+          // Try to hit the auth endpoint with OPTIONS to check if API is ready
+          // This is the actual endpoint the app will use
+          const apiResponse = await fetch(`${BASE_URL}/api/v1/auth/login`, {
+            method: 'OPTIONS',
             signal: apiController.signal,
+            headers: {
+              'Origin': 'null',
+              'Access-Control-Request-Method': 'POST',
+            },
           });
           
           clearTimeout(apiTimeoutId);
-          log('✓ API root check:', apiResponse.status);
+          log('✓ API auth check:', apiResponse.status);
           
-          // 200, 404, or 405 means the API is up (even if endpoint doesn't exist)
-          if (apiResponse.status === 200 || apiResponse.status === 404 || apiResponse.status === 405) {
+          // 200/204 = CORS preflight success, 404 = endpoint not found (shouldn't happen)
+          // Both mean the API is responding
+          if (apiResponse.status === 200 || apiResponse.status === 204) {
             log('✓✓ API is fully awake and ready!');
             return true;
           }
         } catch (apiError: any) {
           // API might still be initializing, but health is up
           // This is okay - continue to next attempt
-          log('API root check failed, but health is up. Retrying...');
+          log('API auth check failed, but health is up. Retrying...');
         }
         
         // Health is up but API check had issues - wait and retry
@@ -198,7 +219,7 @@ export async function withRetry<T>(
       lastError = error;
       
       if (attempt < maxRetries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Max 5s delay
+        const delay = Math.min(500 * attempt, 1500); // Max 1.5s delay, faster retries
         onRetry?.(attempt, error);
         log(`Retry ${attempt}/${maxRetries} after ${delay}ms`);
         await new Promise(r => setTimeout(r, delay));

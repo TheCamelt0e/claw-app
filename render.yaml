@@ -13,8 +13,11 @@ services:
         fromDatabase:
           name: claw-postgres
           property: connectionString
+      # IMPORTANT: Set this manually in Render dashboard!
+      # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+      # If not set, a new key is generated on each deploy (invalidates all JWT tokens)
       - key: SECRET_KEY
-        generateValue: true
+        sync: false  # Must be set manually in Render dashboard
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_RPM_LIMIT

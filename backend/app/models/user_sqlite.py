@@ -82,16 +82,36 @@ class User(Base):
             return -1
         return 50  # Free tier limit
     
-    def update_streak(self) -> dict:
+    def update_streak(self, db_session=None) -> dict:
         """
         Update strike streak. Call this whenever user strikes an item.
         Returns streak info for UI feedback.
+        
+        Args:
+            db_session: Optional database session for row locking (prevents race conditions)
         """
+        # If db_session provided, lock the row to prevent concurrent updates
+        if db_session:
+            from sqlalchemy.orm import with_for_update
+            locked_user = db_session.query(User).filter(
+                User.id == self.id
+            ).with_for_update().first()
+            # Use locked_user's data for consistency
+            last_strike = locked_user.last_strike_date
+            current_streak = locked_user.current_streak_days
+            longest_streak = locked_user.longest_streak_days
+        else:
+            # No locking - use current instance (risk of race condition)
+            last_strike = self.last_strike_date
+            current_streak = self.current_streak_days
+            longest_streak = self.longest_streak_days
+        
         now = datetime.utcnow()
         today = now.date()
+        new_milestones = []
         
-        if self.last_strike_date:
-            last_date = self.last_strike_date.date()
+        if last_strike:
+            last_date = last_strike.date()
             days_diff = (today - last_date).days
             
             if days_diff == 0:
@@ -99,33 +119,35 @@ class User(Base):
                 pass
             elif days_diff == 1:
                 # Streak continues!
-                self.current_streak_days += 1
-                if self.current_streak_days > self.longest_streak_days:
-                    self.longest_streak_days = self.current_streak_days
+                current_streak += 1
+                if current_streak > longest_streak:
+                    longest_streak = current_streak
             else:
                 # Streak broken :(
-                self.current_streak_days = 1
+                current_streak = 1
         else:
             # First strike ever
-            self.current_streak_days = 1
+            current_streak = 1
         
+        # Update instance values
+        self.current_streak_days = current_streak
+        self.longest_streak_days = longest_streak
         self.last_strike_date = now
         
         # Check for milestones
         milestones = self.streak_milestones.split(',') if self.streak_milestones else []
-        new_milestones = []
         
         for days in [7, 30, 100, 365]:
             milestone_key = f"{days}_day"
-            if self.current_streak_days >= days and milestone_key not in milestones:
+            if current_streak >= days and milestone_key not in milestones:
                 milestones.append(milestone_key)
                 new_milestones.append(days)
         
         self.streak_milestones = ','.join(milestones)
         
         return {
-            "current_streak": self.current_streak_days,
-            "longest_streak": self.longest_streak_days,
+            "current_streak": current_streak,
+            "longest_streak": longest_streak,
             "new_milestones": new_milestones,
             "streak_maintained": True
         }

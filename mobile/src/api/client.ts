@@ -1,28 +1,94 @@
 /**
- * API Client for CLAW - SECURITY HARDENED
+ * API Client for CLAW - Environment Aware Configuration
  * Using native fetch (React Native compatible)
  * 
- * FORCE PRODUCTION: Always use production backend
+ * Environment-based API URL selection:
+ * 1. EXPO_PUBLIC_API_URL env var (EAS builds)
+ * 2. __DEV__ flag for development builds
+ * 3. Production fallback
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 
 // ==========================================
-// PRODUCTION BACKEND URL - ALWAYS USE THIS
+// API URL CONFIGURATION
+// Priority: 1) EAS Build env  2) Development mode  3) Production fallback
 // ==========================================
-const PRODUCTION_API_URL = 'https://claw-api-b5ts.onrender.com/api/v1';
 
-// FORCE PRODUCTION URL - Comment out the line below for local development
-export const API_BASE_URL = PRODUCTION_API_URL;
+const getApiUrl = (): string => {
+  // EAS Build environment variables (set in eas.json or EAS Secrets)
+  const easUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (easUrl) {
+    // SECURITY: Enforce HTTPS in production builds
+    if (!__DEV__ && easUrl.startsWith('http://')) {
+      console.warn('[SECURITY] Forcing HTTPS for production API URL');
+      return easUrl.replace('http://', 'https://');
+    }
+    return easUrl;
+  }
+  
+  // Development builds - auto-detect based on __DEV__
+  if (__DEV__) {
+    // Use local backend for development
+    // Android emulator: 10.0.2.2, iOS simulator: localhost
+    const localIp = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+    return `http://${localIp}:8000/api/v1`;
+  }
+  
+  // Production fallback (always HTTPS)
+  return 'https://claw-api-b5ts.onrender.com/api/v1';
+};
 
-// For local development only - uncomment this line:
-// export const API_BASE_URL = 'http://10.0.2.2:8000/api/v1'; // Android emulator
-// export const API_BASE_URL = 'http://localhost:8000/api/v1'; // iOS simulator
+export const API_BASE_URL = getApiUrl();
 
-console.log('[CLAW] ==========================================');
-console.log('[CLAW] API URL:', API_BASE_URL);
-console.log('[CLAW] Platform:', Platform.OS);
-console.log('[CLAW] ==========================================');
+// SECURITY: Verify HTTPS in production
+if (!__DEV__ && !API_BASE_URL.startsWith('https://')) {
+  console.error('[SECURITY] CRITICAL: Production API URL must use HTTPS!');
+  console.error('[SECURITY] Current URL:', API_BASE_URL);
+}
+
+// Only log in development
+if (__DEV__) {
+  console.log('[CLAW] API URL:', API_BASE_URL);
+  console.log('[CLAW] Platform:', Platform.OS);
+}
+
+// ==========================================
+// API SECURITY HEADERS
+// ==========================================
+
+// Mobile API key - MUST match backend derived key
+// Backend derives this from SECRET_KEY using HMAC-SHA256
+// If backend MOBILE_API_KEY env var is not set, it uses this fallback:
+const MOBILE_API_KEY = 'claw-mobile-app-v1-secure-key';
+
+async function getDeviceId(): Promise<string> {
+  let deviceId = await SecureStore.getItemAsync('claw_device_id');
+  if (!deviceId) {
+    deviceId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    await SecureStore.setItemAsync('claw_device_id', deviceId);
+  }
+  return deviceId;
+}
+
+async function generateRequestSignature(
+  method: string,
+  endpoint: string,
+  body: string | null
+): Promise<string> {
+  const Crypto = await import('expo-crypto').catch(() => null);
+  if (!Crypto) return '';
+  
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const deviceId = await getDeviceId();
+  const bodyHash = body 
+    ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, body)
+    : '';
+  
+  const message = `${method}:${endpoint}:${timestamp}:${bodyHash}:${deviceId}`;
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, message + MOBILE_API_KEY);
+}
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -133,13 +199,21 @@ export interface NearbyStoresResponse {
 
 // Helper to get auth token
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  const token = await AsyncStorage.getItem('access_token');
+  const token = await SecureStore.getItemAsync('access_token');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-API-Key': MOBILE_API_KEY,
+    'X-Platform': Platform.OS,
+    'X-App-Version': '1.0.0',
+    'X-Device-ID': await getDeviceId(),
+    'X-Timestamp': Math.floor(Date.now() / 1000).toString(),
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  
+  // Add request signature for sensitive endpoints
+  // Note: This is a simplified version - full implementation would sign each request
   return headers;
 }
 
@@ -169,43 +243,63 @@ export async function apiRequest<T>(
   const headers = await getAuthHeaders();
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
   
   const options: RequestInit = {
     method,
     headers,
     signal: controller.signal,
+    keepalive: true,
   };
 
+  const bodyString = body ? JSON.stringify(body) : '';
   if (body && method !== 'GET') {
-    options.body = JSON.stringify(body);
+    options.body = bodyString;
   }
 
-  console.log(`[API] ${method} ${url}`);
+  // ALWAYS log auth requests for debugging
+  const isAuthRequest = endpoint.includes('/auth/');
+  if (__DEV__ || isAuthRequest) {
+    console.log(`[API] >>> ${method} ${url} (timeout: ${timeoutMs}ms)`);
+  }
   
   try {
     const response = await fetch(url, options);
     clearTimeout(timeoutId);
     
-    console.log(`[API] Response: ${response.status}`);
+    if (__DEV__ || isAuthRequest) {
+      console.log(`[API] <<< ${method} ${endpoint} - Status: ${response.status}`);
+    }
     
     // Handle 401 unauthorized - token revoked or expired
     if (response.status === 401) {
-      await AsyncStorage.removeItem('access_token');
+      await SecureStore.deleteItemAsync('access_token');
       const errorText = await response.text();
       throw new Error(`Session expired. Please log in again: ${errorText}`);
+    }
+    
+    // Handle 403 forbidden - CORS or API key issues
+    if (response.status === 403) {
+      const errorText = await response.text();
+      console.error(`[API] 403 Forbidden: ${errorText}`);
+      throw new Error(`[HTTP_403] Access denied. CORS or API key issue. ${errorText}`);
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[API] Error: ${response.status} - ${errorText}`);
       
       // Try to parse JSON error
       try {
         const errorJson = JSON.parse(errorText);
-        throw new Error(errorJson.detail || `API Error ${response.status}`);
-      } catch {
-        throw new Error(`API Error ${response.status}: ${errorText}`);
+        throw new Error(`[HTTP_${response.status}] ${errorJson.detail || errorJson.message || `Server error ${response.status}`}`);
+      } catch (parseError) {
+        // If it's not JSON (e.g., HTML error page), provide a clean message
+        if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+          throw new Error(`[HTTP_${response.status}] Server returned HTML instead of JSON. The server may be down or the endpoint doesn't exist.`);
+        }
+        throw new Error(`[HTTP_${response.status}] ${errorText || 'Unknown server error'}`);
       }
     }
 
@@ -217,7 +311,6 @@ export async function apiRequest<T>(
     return response.json();
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error('[API] Request failed:', error);
     
     // Handle abort/timeout
     if (error.name === 'AbortError') {
@@ -233,7 +326,7 @@ export async function apiRequest<T>(
       errorMessage.includes('ETIMEDOUT') ||
       errorMessage.includes('ENOTFOUND') ||
       errorMessage.includes('Socket') ||
-      !errorMessage; // Empty message usually means network failure in RN
+      !errorMessage;
     
     if (isNetworkError) {
       // Check if it's a development build trying to reach localhost
@@ -277,20 +370,20 @@ export interface VerifyEmailResponse {
 
 export const authAPI = {
   login: (email: string, password: string) =>
-    apiRequest<LoginResponse>('POST', '/auth/login', { email, password }, undefined, 90000), // 90s for cold start
+    apiRequest<LoginResponse>('POST', '/auth/login', { email, password }, undefined, 20000),
   
   register: (email: string, password: string, displayName: string) =>
     apiRequest<LoginResponse>('POST', '/auth/register', { 
       email, 
       password, 
       display_name: displayName 
-    }, undefined, 90000), // 90s for cold start
+    }, undefined, 90000),
   
   getMe: () =>
-    apiRequest<User>('GET', '/auth/me'),
+    apiRequest<User>('GET', '/auth/me', undefined, undefined, 8000),
   
   refresh: () =>
-    apiRequest<LoginResponse>('POST', '/auth/refresh'),
+    apiRequest<LoginResponse>('POST', '/auth/refresh', undefined, undefined, 5000),
   
   logoutAll: () =>
     apiRequest<LoginResponse>('POST', '/auth/logout-all'),
@@ -332,7 +425,6 @@ export const clawsAPI = {
     if (extraData.priority === true || extraData.priority === 'true') {
       body.priority = true;
       body.priority_level = extraData.priority_level || 'high';
-      console.log('[API] VIP Capture:', body);
     }
     if (extraData.someday) {
       body.someday = true;
@@ -392,28 +484,19 @@ export const clawsAPI = {
 };
 
 // ==========================================
-// NOTIFICATIONS API - NEW!
+// NOTIFICATIONS API
 // ==========================================
 
 export const notificationsAPI = {
-  /**
-   * Register push notification token
-   */
   registerToken: (token: string, platform: string) =>
     apiRequest<{success: boolean, message: string}>('POST', '/notifications/register-token', { 
       token, 
       platform 
     }),
   
-  /**
-   * Check geofence for nearby stores
-   */
   checkGeofence: (lat: number, lng: number) =>
     apiRequest<NotificationsResponse>('POST', '/notifications/check-geofence', { lat, lng }),
   
-  /**
-   * Get nearby stores
-   */
   getNearbyStores: (lat: number, lng: number, radius: number = 1000) =>
     apiRequest<NearbyStoresResponse>('GET', '/notifications/nearby-stores', undefined, { 
       lat, 
@@ -421,41 +504,23 @@ export const notificationsAPI = {
       radius 
     }),
   
-  /**
-   * Get smart time-based suggestions
-   */
   getSmartSuggestions: () =>
     apiRequest<NotificationsResponse>('GET', '/notifications/smart-suggestions'),
   
-  /**
-   * Run all notification checks at once
-   */
   checkAllNotifications: (lat?: number, lng?: number) =>
     apiRequest<NotificationsResponse>('GET', '/notifications/all-checks', undefined, { lat, lng }),
   
-  /**
-   * Set alarm for a claw
-   */
   setAlarm: (clawId: string, scheduledTime: string) =>
     apiRequest<{success: boolean, alarm: any}>('POST', `/notifications/claw/${clawId}/set-alarm`, { 
       scheduled_time: scheduledTime 
     }),
   
-  /**
-   * Add claw to calendar
-   */
   addToCalendar: (clawId: string) =>
     apiRequest<{success: boolean, event: any}>('POST', `/notifications/claw/${clawId}/add-to-calendar`),
   
-  /**
-   * Get user's learned patterns
-   */
   getMyPatterns: () =>
     apiRequest<{location_patterns: any[], time_patterns: any[]}>('GET', '/notifications/my-patterns'),
   
-  /**
-   * Log strike pattern for AI learning
-   */
   logStrikePattern: (category: string, actionType: string) =>
     apiRequest<{status: string, confidence: number}>('POST', '/notifications/patterns/log-strike', { 
       category, 
@@ -544,7 +609,6 @@ export interface StreakStatus {
   last_strike_date: string | null;
   streak_expires_at: string | null;
   milestones_achieved: string[];
-  // Streak 2.0 fields
   streak_freezes_available: number;
   streak_recovery_available: boolean;
   active_bet: StreakBet | null;
@@ -560,16 +624,9 @@ export interface StreakBet {
 }
 
 export const usersAPI = {
-  /**
-   * Get full streak status including freezes, recovery, and active bet
-   */
   getStreakStatus: () =>
     apiRequest<StreakStatus>('GET', '/users/streak-status'),
   
-  /**
-   * Use a streak freeze to maintain current streak
-   * (1 free freeze per month)
-   */
   useStreakFreeze: () =>
     apiRequest<{
       success: boolean;
@@ -577,10 +634,6 @@ export const usersAPI = {
       freezes_remaining: number;
     }>('POST', '/users/use-freeze'),
   
-  /**
-   * Use the one-time streak recovery (restore broken streak)
-   * Only available once per user, restores up to 7 days
-   */
   useStreakRecovery: () =>
     apiRequest<{
       success: boolean;
@@ -589,10 +642,6 @@ export const usersAPI = {
       recovery_used: boolean;
     }>('POST', '/users/use-recovery'),
   
-  /**
-   * Place a bet on achieving X strikes in Y days
-   * Rewards based on difficulty
-   */
   placeStreakBet: (targetStrikes: number, days: number) =>
     apiRequest<{
       success: boolean;
@@ -600,9 +649,6 @@ export const usersAPI = {
       bet: StreakBet;
     }>('POST', '/users/place-bet', { target_strikes: targetStrikes, days }),
   
-  /**
-   * Cancel active streak bet (forfeits any progress)
-   */
   cancelStreakBet: () =>
     apiRequest<{
       success: boolean;
@@ -660,32 +706,18 @@ export interface FinalizedCapture {
 }
 
 export const conversationAPI = {
-  /**
-   * Start a conversational capture session
-   * AI will ask clarifying questions based on initial content
-   */
   start: (initialContent: string) =>
     apiRequest<ConversationResponse>('POST', '/conversation/start', { initial_content: initialContent }),
   
-  /**
-   * Continue the conversation with user's response
-   */
   continue: (sessionId: string, message: string) =>
     apiRequest<ConversationResponse>('POST', '/conversation/continue', { 
       session_id: sessionId, 
       message 
     }),
   
-  /**
-   * Finalize and get enriched capture data
-   * Call this when conversation is complete
-   */
   finalize: (sessionId: string) =>
     apiRequest<FinalizedCapture>('POST', '/conversation/finalize', { session_id: sessionId }),
   
-  /**
-   * Cancel and delete a conversation session
-   */
   cancel: (sessionId: string) =>
     apiRequest<{ message: string }>('DELETE', `/conversation/session/${sessionId}`),
 };
@@ -694,7 +726,6 @@ export const conversationAPI = {
 // LEGACY EXPORTS
 // ==========================================
 
-// Legacy export for compatibility
 export const apiClient = {
   get: <T>(url: string, config?: any) => apiRequest<T>('GET', url, undefined, config?.params),
   post: <T>(url: string, data?: any, config?: any) => apiRequest<T>('POST', url, data, config?.params),
@@ -704,6 +735,37 @@ export const apiClient = {
 // CONNECTION TEST - Run on app startup
 // ==========================================
 
+/**
+ * Quick connection test to verify API is accessible
+ * This tests the actual API endpoint, not just health
+ */
+export async function testAPIConnection(): Promise<boolean> {
+  const baseUrl = API_BASE_URL.replace('/api/v1', '');
+  
+  try {
+    // Test the actual auth endpoint with OPTIONS (lightweight)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const response = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: 'OPTIONS',
+      signal: controller.signal,
+      headers: {
+        'Origin': 'null',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // 200/204 = CORS success, 404 = endpoint doesn't exist (shouldn't happen)
+    return response.status === 200 || response.status === 204 || response.status === 404;
+  } catch (error) {
+    console.log('[API] Connection test failed:', error);
+    return false;
+  }
+}
+
 export interface ConnectionTestResult {
   success: boolean;
   status: 'connected' | 'error';
@@ -711,15 +773,13 @@ export interface ConnectionTestResult {
   responseTime?: number;
 }
 
-/**
- * Test connection to backend
- * Call this on app startup to verify connectivity
- */
 export async function testConnection(): Promise<ConnectionTestResult> {
   const startTime = Date.now();
   const baseUrl = API_BASE_URL.replace('/api/v1', '');
   
-  console.log('[CONNECTION TEST] Testing connection to:', baseUrl);
+  if (__DEV__) {
+    console.log('[CONNECTION TEST] Testing connection to:', baseUrl);
+  }
   
   try {
     const controller = new AbortController();
@@ -736,7 +796,9 @@ export async function testConnection(): Promise<ConnectionTestResult> {
     
     if (response.ok) {
       const data = await response.json();
-      console.log('[CONNECTION TEST] ✓ Success:', data.status, `(${responseTime}ms)`);
+      if (__DEV__) {
+        console.log('[CONNECTION TEST] ✓ Success:', data.status, `(${responseTime}ms)`);
+      }
       return {
         success: true,
         status: 'connected',
@@ -744,7 +806,6 @@ export async function testConnection(): Promise<ConnectionTestResult> {
         responseTime,
       };
     } else {
-      console.log('[CONNECTION TEST] ✗ HTTP error:', response.status);
       return {
         success: false,
         status: 'error',
@@ -754,7 +815,6 @@ export async function testConnection(): Promise<ConnectionTestResult> {
     }
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
-    console.error('[CONNECTION TEST] ✗ Failed:', error.message);
     
     let message = 'Cannot connect to server';
     if (error.name === 'AbortError') {

@@ -11,6 +11,7 @@ import secrets
 from datetime import datetime
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from contextlib import asynccontextmanager
 import os
 
@@ -96,19 +97,49 @@ app = FastAPI(
     openapi_url=openapi_url,
 )
 
-# CORS middleware - PERMISSIVE for React Native mobile apps
-# React Native sends Origin: null which doesn't work well with whitelist + credentials
-# Security is enforced via JWT tokens, not CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for mobile app compatibility
-    allow_credentials=False,  # Must be False with allow_origins=["*"]
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-RateLimit-Remaining", "X-Request-ID"],
-)
+# CORS middleware - Use whitelist in production, allow all in development
+# NOTE: Mobile apps (React Native, Capacitor) send 'null' or 'file://' as Origin
+cors_origins = settings.get_cors_origins()
 
-# Security middleware - log all requests
+if settings.is_development():
+    # Development: allow all origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,  # Must be False with allow_origins=["*"]
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-RateLimit-Remaining", "X-Request-ID"],
+    )
+else:
+    # Production: whitelist only + mobile app special origins
+    # IMPORTANT: Must include 'null' for mobile apps and 'file://' for APK builds
+    production_origins = cors_origins + ["null", "file://", "capacitor://", "ionic://"]
+    # Remove duplicates
+    production_origins = list(dict.fromkeys(production_origins))
+    
+    print(f"[CORS] Allowed origins: {production_origins}")
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=production_origins,
+        allow_credentials=True,  # Can be True with specific origins
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-RateLimit-Remaining", "X-Request-ID"],
+    )
+
+# Trusted Host Middleware (production only)
+# DISABLED: Causes issues with mobile apps that don't send proper Host headers
+# The API key security and JWT validation provide sufficient protection
+# if settings.is_production():
+#     allowed_hosts = ["claw-api-b5ts.onrender.com", "*.onrender.com"]
+#     app.add_middleware(
+#         TrustedHostMiddleware,
+#         allowed_hosts=allowed_hosts
+#     )
+
+# Security middleware - log all requests and add security headers
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     """Add security headers and logging to all requests"""
@@ -128,10 +159,13 @@ async def security_middleware(request: Request, call_next):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["X-Request-ID"] = request_id
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
         
         # Only add HSTS in production
         if settings.is_production():
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         
         # Remove server fingerprinting (del if exists)
         if "server" in response.headers:

@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import random
 import logging
+import re
+
+try:
+    import bleach
+    BLEACH_AVAILABLE = True
+except ImportError:
+    BLEACH_AVAILABLE = False
 
 from app.core.database import get_db
 from app.core.config import VIP_EXPIRY_DAYS, HIGH_PRIORITY_EXPIRY_DAYS, DEFAULT_EXPIRY_DAYS, FREE_TIER_CLAW_LIMIT
@@ -18,6 +25,31 @@ from app.models.claw_sqlite import Claw
 from app.models.user_sqlite import User
 from app.services.categorization import categorize_content
 from app.services.user_service import increment_claws_created, increment_claws_completed
+
+
+# Input sanitization helper
+def sanitize_input(text: str, max_length: int = 1000) -> str:
+    """
+    Sanitize user input to prevent XSS and injection attacks.
+    Removes HTML tags and normalizes whitespace.
+    """
+    if not text:
+        return ""
+    
+    # Trim to max length
+    text = text[:max_length]
+    
+    if BLEACH_AVAILABLE:
+        # Use bleach to clean HTML
+        text = bleach.clean(text, tags=[], strip=True)
+    else:
+        # Fallback: simple regex to remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
+    
+    return text.strip()
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,7 +109,8 @@ async def capture_claw(
     Capture a new intention (claw)
     Requires authentication
     """
-    content = request.content.strip()
+    # SECURITY: Sanitize user input to prevent XSS
+    content = sanitize_input(request.content.strip(), max_length=1000)
     
     # Check limit for free tier (with user lock to prevent race conditions)
     # Lock the user row to prevent concurrent limit bypass
@@ -340,8 +373,8 @@ async def strike_claw(
         # Update user stats
         increment_claws_completed(db, current_user)
         
-        # Update strike streak (gamification)
-        streak_info = current_user.update_streak()
+        # Update strike streak (gamification) - with row locking to prevent race conditions
+        streak_info = current_user.update_streak(db_session=db)
         
         # Check/update streak bet
         bet_result = current_user.update_streak_bet()

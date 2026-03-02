@@ -1,11 +1,12 @@
 /**
  * Authentication State Management (Zustand)
- * JWT-based authentication with token refresh
+ * JWT-based authentication with secure token storage
  */
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
-import { authAPI } from '../api/client';
+import { authAPI, testAPIConnection } from '../api/client';
 import { waitForServer, isServerSleepingError, withRetry } from '../service/serverWake';
 
 interface User {
@@ -51,9 +52,46 @@ interface AuthState {
   setIsLoading: (loading: boolean) => void;
 }
 
-// Token storage keys
+// Token storage keys - SECURE storage for sensitive tokens
 const TOKEN_KEY = 'access_token';
 const TOKEN_EXPIRES_KEY = 'token_expires_at';
+
+/**
+ * Secure token storage helper functions
+ * Uses expo-secure-store for encrypted storage
+ */
+async function secureStoreToken(key: string, value: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(key, value);
+  } catch (error) {
+    console.error('[AUTH] Failed to store token securely:', error);
+    // Fallback to AsyncStorage only in development
+    if (__DEV__) {
+      await AsyncStorage.setItem(key, value);
+    }
+    throw new Error('Failed to store authentication token securely');
+  }
+}
+
+async function secureGetToken(key: string): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key);
+  } catch (error) {
+    console.error('[AUTH] Failed to retrieve token securely:', error);
+    // Fallback to AsyncStorage for migration/compatibility
+    return await AsyncStorage.getItem(key);
+  }
+}
+
+async function secureRemoveToken(key: string): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch (error) {
+    console.error('[AUTH] Failed to remove token securely:', error);
+  }
+  // Also remove from AsyncStorage (cleanup)
+  await AsyncStorage.removeItem(key);
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -67,22 +105,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: async (email: string, password: string) => {
     console.log('[AUTH] ========== LOGIN START ==========');
-    console.log('[AUTH] Email:', email);
-    console.log('[AUTH] Password length:', password?.length || 0);
+    // SECURITY: Don't log sensitive data like email or password
     
     try {
       set({ isLoading: true, error: null });
       
       // NOTE: With paid tier, server is always-on - no wake needed
-      // Keeping minimal check for development/local servers
       console.log('[AUTH] Step 0: Checking server availability...');
       
-      // Quick check only - server should respond immediately with paid tier
+      // Quick check only - 2 attempts max (4 seconds)
       const serverReady = await waitForServer(
         (message) => {
           set({ error: message });
         },
-        3 // Only 3 quick attempts (6 seconds max)
+        2 // Only 2 attempts - fail fast
       );
       
       if (!serverReady) {
@@ -92,17 +128,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       
       console.log('[AUTH] Server is ready, proceeding with login...');
       
+      // Quick test of actual API endpoint before attempting login
+      console.log('[AUTH] Testing API connection...');
+      const apiReady = await testAPIConnection();
+      if (!apiReady) {
+        console.log('[AUTH] API connection test failed');
+        throw new Error('[NETWORK] API endpoint not responding. Server may still be initializing.');
+      }
+      console.log('[AUTH] API connection test passed');
+      
       console.log('[AUTH] Step 1: Calling login API...');
       
-      // Retry login with exponential backoff in case of network issues
-      const response = await withRetry(
-        () => authAPI.login(email, password),
-        3, // 3 retries
-        (attempt, error) => {
-          console.log(`[AUTH] Login attempt ${attempt} failed, retrying...`, error?.message);
-          set({ error: `Connection issue, retrying (${attempt}/3)...` });
-        }
+      // Add a global timeout for the entire login operation (20s max)
+      const loginPromise = authAPI.login(email, password);
+      const loginTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('[TIMEOUT] Login request timed out after 20s')), 20000)
       );
+      
+      // Race between login and timeout
+      const response = await Promise.race([loginPromise, loginTimeout]) as any;
       
       console.log('[AUTH] Step 2: Login API success');
       console.log('[AUTH] Response:', {
@@ -117,11 +161,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const expires_at = Date.now() + (expires_in * 1000);
       console.log('[AUTH] Step 3: Token expires at:', new Date(expires_at).toISOString());
       
-      // Store token and expiration
-      console.log('[AUTH] Step 4: Storing token...');
-      await AsyncStorage.setItem(TOKEN_KEY, access_token);
-      await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
-      console.log('[AUTH] Step 5: Token stored successfully');
+      // Store token and expiration SECURELY
+      console.log('[AUTH] Step 4: Storing token securely...');
+      await secureStoreToken(TOKEN_KEY, access_token);
+      await secureStoreToken(TOKEN_EXPIRES_KEY, expires_at.toString());
+      console.log('[AUTH] Step 5: Token stored securely');
       
       // Get user data with retry
       console.log('[AUTH] Step 6: Fetching user data (/auth/me)...');
@@ -133,11 +177,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       );
       
-      console.log('[AUTH] Step 7: User data received:', {
-        id: meResponse.id,
-        email: meResponse.email,
-        displayName: meResponse.display_name,
-      });
+      console.log('[AUTH] Step 7: User data received');
       
       set({
         user: meResponse,
@@ -185,7 +225,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           userMessage = 'Too many login attempts. Please wait 5 minutes.';
           break;
         case 'HTTP_403':
-          userMessage = 'Account is deactivated. Contact support.';
+          userMessage = 'Account access denied. Please verify your email or contact support.';
+          break;
+        case 'HTTP_400':
+          userMessage = 'Invalid request. Please check your email and password format.';
+          break;
+        case 'HTTP_422':
+          userMessage = 'Invalid data format. Please check your inputs.';
+          break;
+        case 'HTTP_500':
+        case 'HTTP_502':
+        case 'HTTP_503':
+          userMessage = 'Server error. Please try again in a few moments.';
           break;
         case 'NETWORK':
           userMessage = 'Cannot connect to server. Check your internet connection.';
@@ -245,9 +296,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Calculate expiration timestamp
       const expires_at = Date.now() + (expires_in * 1000);
       
-      // Store token and expiration
-      await AsyncStorage.setItem(TOKEN_KEY, access_token);
-      await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
+      // Store token and expiration SECURELY
+      await secureStoreToken(TOKEN_KEY, access_token);
+      await secureStoreToken(TOKEN_EXPIRES_KEY, expires_at.toString());
       
       // Get user data with retry
       console.log('[AUTH] Step 2: Fetching user data...');
@@ -291,7 +342,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     console.log('[AUTH] Logging out...');
-    await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRES_KEY]);
+    await secureRemoveToken(TOKEN_KEY);
+    await secureRemoveToken(TOKEN_EXPIRES_KEY);
     set({ 
       user: null, 
       isAuthenticated: false,
@@ -303,57 +355,90 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   checkAuth: async () => {
     console.log('[AUTH] ========== CHECK AUTH START ==========');
     
+    // GLOBAL TIMEOUT: Ensure we NEVER hang for more than 6 seconds
+    const GLOBAL_TIMEOUT_MS = 6000;
+    let timeoutId: NodeJS.Timeout;
+    
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        console.error('[AUTH] GLOBAL TIMEOUT TRIGGERED!');
+        reject(new Error('[TIMEOUT] Auth check took too long'));
+      }, GLOBAL_TIMEOUT_MS);
+    });
+    
     try {
-      const token = await AsyncStorage.getItem(TOKEN_KEY);
-      const expiresAtStr = await AsyncStorage.getItem(TOKEN_EXPIRES_KEY);
-      
-      console.log('[AUTH] Token exists:', !!token);
-      console.log('[AUTH] Expires at:', expiresAtStr);
-      
-      if (!token) {
-        console.log('[AUTH] No token found');
-        set({ isLoading: false, isAuthenticated: false });
-        return;
-      }
-      
-      console.log('[AUTH] Fetching user data...');
-
-      // Check if token is expired or about to expire (within 5 minutes)
-      let expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
-      if (isNaN(expiresAt)) {
-        expiresAt = 0;
-      }
-      const isExpired = Date.now() >= (expiresAt - 5 * 60 * 1000);
-      
-      if (isExpired) {
-        // Try to refresh token
-        const refreshed = await get().refreshToken();
-        if (!refreshed) {
+      const authCheckPromise = (async () => {
+        console.log('[AUTH] Step 1: Reading token from secure storage...');
+        const token = await secureGetToken(TOKEN_KEY);
+        const expiresAtStr = await secureGetToken(TOKEN_EXPIRES_KEY);
+        
+        console.log('[AUTH] Token exists:', !!token);
+        
+        if (!token) {
+          console.log('[AUTH] No token found - skipping to logged out state');
           set({ isLoading: false, isAuthenticated: false });
+          clearTimeout(timeoutId);
           return;
         }
-      }
+        
+        console.log('[AUTH] Step 2: Checking token expiration...');
 
-      // Get user data with timeout
-      console.log('[AUTH] Fetching user data with stored token...');
-      const meResponse = await Promise.race([
-        authAPI.getMe(),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Request timed out')), 10000)
-        )
-      ]);
+        // Check if token is expired or about to expire (within 5 minutes)
+        let expiresAt = expiresAtStr ? parseInt(expiresAtStr, 10) : 0;
+        if (isNaN(expiresAt)) {
+          expiresAt = 0;
+        }
+        const isExpired = Date.now() >= (expiresAt - 5 * 60 * 1000);
+        
+        if (isExpired) {
+          console.log('[AUTH] Step 3a: Token expired, attempting refresh...');
+          // Try to refresh token with its own timeout
+          const refreshPromise = get().refreshToken();
+          const refreshTimeout = new Promise<boolean>((resolve) => {
+            setTimeout(() => {
+              console.log('[AUTH] Token refresh timed out');
+              resolve(false);
+            }, 4000);
+          });
+          const refreshed = await Promise.race([refreshPromise, refreshTimeout]);
+          
+          if (!refreshed) {
+            console.log('[AUTH] Token refresh failed or timed out - logging out');
+            set({ isLoading: false, isAuthenticated: false });
+            clearTimeout(timeoutId);
+            return;
+          }
+          console.log('[AUTH] Token refresh succeeded');
+        }
+
+        // Get user data with timeout
+        console.log('[AUTH] Step 3b: Calling getMe API...');
+        const mePromise = authAPI.getMe();
+        const meTimeout = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('[TIMEOUT] getMe request timed out')), 4000)
+        );
+        
+        const meResponse = await Promise.race([mePromise, meTimeout]);
+        
+        console.log('[AUTH] Step 4: getMe succeeded, updating state');
+        set({
+          user: meResponse,
+          isAuthenticated: true,
+          isLoading: false,
+        });
+        clearTimeout(timeoutId);
+        console.log('[AUTH] ========== CHECK AUTH COMPLETE ==========');
+      })();
       
-      console.log('[AUTH] Auth check successful');
-      set({
-        user: meResponse,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-      console.log('[AUTH] ========== CHECK AUTH COMPLETE ==========');
+      // Race between auth check and global timeout
+      await Promise.race([authCheckPromise, timeoutPromise]);
       
     } catch (error: any) {
-      console.error('[AUTH] Check auth error:', error?.message);
-      await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRES_KEY]);
+      console.error('[AUTH] Check auth ERROR:', error?.message);
+      clearTimeout(timeoutId);
+      // Always clear loading state on error
+      await secureRemoveToken(TOKEN_KEY);
+      await secureRemoveToken(TOKEN_EXPIRES_KEY);
       set({ 
         isLoading: false, 
         isAuthenticated: false,
@@ -372,9 +457,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Calculate new expiration
       const expires_at = Date.now() + (expires_in * 1000);
       
-      // Store new token
-      await AsyncStorage.setItem(TOKEN_KEY, access_token);
-      await AsyncStorage.setItem(TOKEN_EXPIRES_KEY, expires_at.toString());
+      // Store new token SECURELY
+      await secureStoreToken(TOKEN_KEY, access_token);
+      await secureStoreToken(TOKEN_EXPIRES_KEY, expires_at.toString());
       
       console.log('[AUTH] Token refreshed successfully');
       return true;
@@ -382,7 +467,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error: any) {
       console.error('[AUTH] Token refresh failed:', error?.message);
       // Clear auth state on refresh failure
-      await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRES_KEY]);
+      await secureRemoveToken(TOKEN_KEY);
+      await secureRemoveToken(TOKEN_EXPIRES_KEY);
       set({ 
         user: null, 
         isAuthenticated: false,
@@ -475,8 +561,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
 // Helper function to check if token needs refresh before API calls
 export async function ensureValidToken(): Promise<string | null> {
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
-  const expiresAtStr = await AsyncStorage.getItem(TOKEN_EXPIRES_KEY);
+  const token = await secureGetToken(TOKEN_KEY);
+  const expiresAtStr = await secureGetToken(TOKEN_EXPIRES_KEY);
   
   if (!token) return null;
   
@@ -485,7 +571,7 @@ export async function ensureValidToken(): Promise<string | null> {
   
   // Handle NaN case
   if (isNaN(expiresAt)) {
-    await AsyncStorage.removeItem(TOKEN_EXPIRES_KEY);
+    await secureRemoveToken(TOKEN_EXPIRES_KEY);
     return null;
   }
   
@@ -494,7 +580,7 @@ export async function ensureValidToken(): Promise<string | null> {
   if (needsRefresh) {
     const refreshed = await useAuthStore.getState().refreshToken();
     if (!refreshed) return null;
-    return await AsyncStorage.getItem(TOKEN_KEY);
+    return await secureGetToken(TOKEN_KEY);
   }
   
   return token;
