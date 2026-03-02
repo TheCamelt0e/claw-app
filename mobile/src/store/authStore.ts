@@ -46,6 +46,9 @@ interface AuthState {
   // Password Reset
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
+  
+  // Internal
+  setIsLoading: (loading: boolean) => void;
 }
 
 // Token storage keys
@@ -59,6 +62,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   error: null,
   
   clearError: () => set({ error: null }),
+  
+  setIsLoading: (loading: boolean) => set({ isLoading: loading }),
 
   login: async (email: string, password: string) => {
     console.log('[AUTH] ========== LOGIN START ==========');

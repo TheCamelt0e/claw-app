@@ -183,6 +183,8 @@ export default function App() {
     initializeApp();
   }, []);
   
+  const { setIsLoading } = useAuthStore.getState();
+
   const initializeApp = async () => {
     try {
       // Step 1: Test backend connection
@@ -201,7 +203,7 @@ export default function App() {
       // Step 2: Check auth (with timeout)
       setConnectionStatus('Checking login status...');
       const authTimeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Auth check timed out')), 15000)
+        setTimeout(() => reject(new Error('Auth check timed out')), 10000)
       );
       
       await Promise.race([checkAuth(), authTimeout]);
@@ -213,6 +215,8 @@ export default function App() {
       
     } catch (error: any) {
       console.error('[App] Initialization error:', error);
+      // IMPORTANT: Force set isLoading to false so loading screen disappears
+      setIsLoading(false);
       setInitError(error?.message || 'Failed to initialize');
       setConnectionStatus('Error: ' + (error?.message || 'Unknown error'));
     }
