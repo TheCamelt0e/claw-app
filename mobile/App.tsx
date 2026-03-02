@@ -103,7 +103,7 @@ function LoadingScreen({ status, onForceContinue }: { status: string; onForceCon
   const [showForceButton, setShowForceButton] = useState(false);
   
   useEffect(() => {
-    const timer = setTimeout(() => setShowForceButton(true), 5000);
+    const timer = setTimeout(() => setShowForceButton(true), 3000);
     return () => clearTimeout(timer);
   }, []);
   
@@ -116,9 +116,14 @@ function LoadingScreen({ status, onForceContinue }: { status: string; onForceCon
       <Text style={styles.loadingText}>Loading CLAW...</Text>
       {status && <Text style={styles.statusText}>{status}</Text>}
       {showForceButton && onForceContinue && (
-        <TouchableOpacity style={styles.forceButton} onPress={onForceContinue}>
-          <Text style={styles.forceButtonText}>Continue Anyway</Text>
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity style={styles.forceButton} onPress={onForceContinue}>
+            <Text style={styles.forceButtonText}>Continue to Login</Text>
+          </TouchableOpacity>
+          <Text style={{color: '#888', marginTop: 10, fontSize: 12}}>
+            Tap above if stuck longer than 3 seconds
+          </Text>
+        </>
       )}
     </LinearGradient>
   );
