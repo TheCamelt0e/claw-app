@@ -55,6 +55,71 @@ if (__DEV__) {
 }
 
 // ==========================================
+// REMOTE LOGGING - Sends logs to backend for debugging
+// ==========================================
+
+const LOG_BUFFER: string[] = [];
+let logFlushTimeout: NodeJS.Timeout | null = null;
+
+export function remoteLog(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`;
+  
+  // Always log to console
+  console.log('[REMOTE_LOG]', logEntry);
+  
+  // Buffer for batch sending
+  LOG_BUFFER.push(logEntry);
+  
+  // Flush after 1 second or if buffer is full
+  if (LOG_BUFFER.length >= 10) {
+    flushLogs();
+  } else if (!logFlushTimeout) {
+    logFlushTimeout = setTimeout(flushLogs, 1000);
+  }
+}
+
+async function flushLogs() {
+  if (LOG_BUFFER.length === 0) return;
+  
+  const logsToSend = [...LOG_BUFFER];
+  LOG_BUFFER.length = 0;
+  if (logFlushTimeout) {
+    clearTimeout(logFlushTimeout);
+    logFlushTimeout = null;
+  }
+  
+  try {
+    // Send logs to backend (non-blocking)
+    fetch(`${API_BASE_URL}/debug/log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': MOBILE_API_KEY,
+      },
+      body: JSON.stringify({ logs: logsToSend, source: 'mobile_app' }),
+    }).catch(() => {}); // Ignore errors
+  } catch {}
+}
+
+// ==========================================
+// AUTH DEBUG - Detailed logging for auth issues
+// ==========================================
+
+export function logAuthEvent(event: string, details?: any) {
+  const entry = {
+    event,
+    details,
+    timestamp: Date.now(),
+    apiUrl: API_BASE_URL,
+    platform: Platform.OS,
+  };
+  
+  console.log('[AUTH_DEBUG]', event, details);
+  remoteLog(`AUTH:${event}`, details);
+}
+
+// ==========================================
 // API SECURITY HEADERS
 // ==========================================
 

@@ -20,3 +20,7 @@ api_router.include_router(conversation.router, prefix="/conversation", tags=["Co
 if settings.is_development():
     from app.api.v1.endpoints import debug_vip
     api_router.include_router(debug_vip.router, prefix="/debug", tags=["Debug"])
+
+# Remote logging endpoint - available in production for debugging
+from app.api.v1.endpoints import debug_remote_log
+api_router.include_router(debug_remote_log.router, prefix="/debug", tags=["Debug"])

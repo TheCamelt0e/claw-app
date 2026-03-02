@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
-import { authAPI, testAPIConnection } from '../api/client';
+import { authAPI, testAPIConnection, logAuthEvent } from '../api/client';
 import { waitForServer, isServerSleepingError, withRetry } from '../service/serverWake';
 
 interface User {
@@ -104,14 +104,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setIsLoading: (loading: boolean) => set({ isLoading: loading }),
 
   login: async (email: string, password: string) => {
-    console.log('[AUTH] ========== LOGIN START ==========');
-    // SECURITY: Don't log sensitive data like email or password
+    logAuthEvent('LOGIN_START', { emailPrefix: email.split('@')[0] });
     
     try {
       set({ isLoading: true, error: null });
       
       // NOTE: With paid tier, server is always-on - no wake needed
-      console.log('[AUTH] Step 0: Checking server availability...');
+      logAuthEvent('CHECKING_SERVER');
       
       // Quick check only - 2 attempts max (4 seconds)
       const serverReady = await waitForServer(
@@ -126,18 +125,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error('[NETWORK] Cannot connect to server. Please check your internet connection.');
       }
       
-      console.log('[AUTH] Server is ready, proceeding with login...');
+      logAuthEvent('SERVER_READY');
       
       // Quick test of actual API endpoint before attempting login
-      console.log('[AUTH] Testing API connection...');
+      logAuthEvent('TESTING_API_CONNECTION');
       const apiReady = await testAPIConnection();
       if (!apiReady) {
-        console.log('[AUTH] API connection test failed');
+        logAuthEvent('API_CONNECTION_FAILED');
         throw new Error('[NETWORK] API endpoint not responding. Server may still be initializing.');
       }
-      console.log('[AUTH] API connection test passed');
+      logAuthEvent('API_CONNECTION_SUCCESS');
       
-      console.log('[AUTH] Step 1: Calling login API...');
+      logAuthEvent('CALLING_LOGIN_API');
       
       // Add a global timeout for the entire login operation (20s max)
       const loginPromise = authAPI.login(email, password);
@@ -148,36 +147,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Race between login and timeout
       const response = await Promise.race([loginPromise, loginTimeout]) as any;
       
-      console.log('[AUTH] Step 2: Login API success');
-      console.log('[AUTH] Response:', {
-        hasToken: !!response.access_token,
-        tokenType: response.token_type,
-        expiresIn: response.expires_in,
-      });
+      logAuthEvent('LOGIN_API_SUCCESS', { hasToken: !!response.access_token });
       
       const { access_token, expires_in } = response;
       
       // Calculate expiration timestamp
       const expires_at = Date.now() + (expires_in * 1000);
-      console.log('[AUTH] Step 3: Token expires at:', new Date(expires_at).toISOString());
+      logAuthEvent('STORING_TOKEN');
       
       // Store token and expiration SECURELY
-      console.log('[AUTH] Step 4: Storing token securely...');
       await secureStoreToken(TOKEN_KEY, access_token);
       await secureStoreToken(TOKEN_EXPIRES_KEY, expires_at.toString());
-      console.log('[AUTH] Step 5: Token stored securely');
       
       // Get user data with retry
-      console.log('[AUTH] Step 6: Fetching user data (/auth/me)...');
+      logAuthEvent('FETCHING_USER_DATA');
       const meResponse = await withRetry(
         () => authAPI.getMe(),
         3,
         (attempt) => {
-          console.log(`[AUTH] GetMe attempt ${attempt} failed, retrying...`);
+          logAuthEvent('GETME_RETRY', { attempt });
         }
       );
       
-      console.log('[AUTH] Step 7: User data received');
+      logAuthEvent('USER_DATA_RECEIVED');
       
       set({
         user: meResponse,
@@ -185,13 +177,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
         error: null,
       });
-      console.log('[AUTH] ========== LOGIN COMPLETE ==========');
+      logAuthEvent('LOGIN_COMPLETE');
       
     } catch (error: any) {
-      console.error('[AUTH] ========== LOGIN ERROR ==========');
-      console.error('[AUTH] Error type:', typeof error);
-      console.error('[AUTH] Error constructor:', error?.constructor?.name);
-      console.error('[AUTH] Error message:', error?.message);
+      logAuthEvent('LOGIN_ERROR', { 
+        errorType: typeof error, 
+        errorName: error?.constructor?.name,
+        errorMessage: error?.message 
+      });
       
       // Check if it's a server sleeping error - give better message
       if (isServerSleepingError(error)) {
